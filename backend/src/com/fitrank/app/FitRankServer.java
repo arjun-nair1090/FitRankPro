@@ -49,7 +49,7 @@ public class FitRankServer {
                 } else if (path.equals("/api/admin/login") && method.equals("POST")) {
                     adminLogin(exchange);
                 } else if (path.equals("/api/auth/forgot") && method.equals("POST")) {
-                    send(exchange, 200, "{\"message\":\"Password reset email queued\"}");
+                    handleForgot(exchange);
                 } else if (path.equals("/api/auth/oauth") && method.equals("POST")) {
                     send(exchange, 200, "{\"message\":\"OAuth handoff ready for Google and Apple\",\"token\":\"demo-oauth-token\"}");
                 } else if (path.equals("/api/dashboard")) {
@@ -108,6 +108,21 @@ public class FitRankServer {
         String email = value(body, "email", "athlete@fitrank.app");
         User user = new User(1, "FitRank Athlete", email, "Strength", "PRO", 8);
         send(exchange, 200, "{\"token\":\"demo-session-1\",\"user\":" + user.toJson() + "}");
+    }
+
+    private void handleForgot(HttpExchange exchange) throws IOException {
+        Map<String, String> body = JsonUtil.parseObject(read(exchange));
+        String email = value(body, "email", "");
+        String token = value(body, "token", "FR-" + Long.toHexString(System.currentTimeMillis()).toUpperCase());
+        String baseUrl = value(body, "resetBaseUrl", "http://localhost:8080/");
+        String resetUrl = baseUrl + "?resetToken=" + token + "&email=" + email;
+        System.out.println("\n====== FitRank Password Reset (Simulated Email) ======");
+        System.out.println("To: " + email);
+        System.out.println("Subject: Reset your FitRank password");
+        System.out.println("Reset URL: " + resetUrl);
+        System.out.println("Token: " + token);
+        System.out.println("======================================================\n");
+        send(exchange, 200, "{\"message\":\"Password reset link generated. Check the server console for the reset URL.\",\"devResetUrl\":\"" + JsonUtil.escape(resetUrl) + "\",\"token\":\"" + JsonUtil.escape(token) + "\"}");
     }
 
     private void adminLogin(HttpExchange exchange) throws IOException {
