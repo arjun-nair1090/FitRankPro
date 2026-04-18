@@ -733,6 +733,10 @@ p {
   gap: 8px;
 }
 
+.mobile-nav-inner.admin-nav {
+  grid-template-columns: 1fr;
+}
+
 .mobile-nav button {
   min-height: 46px;
   border-radius: 16px;
@@ -747,6 +751,179 @@ p {
 
 .hidden {
   display: none !important;
+}
+
+.empty-state {
+  text-align: center;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(8, 10, 16, .76);
+  backdrop-filter: blur(14px);
+}
+
+.modal-card {
+  width: min(920px, calc(100vw - 24px));
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  padding: 24px;
+}
+
+.modal-wide {
+  width: min(1080px, calc(100vw - 24px));
+}
+
+.exercise-picker-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+}
+
+.exercise-option {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  text-align: left;
+  border-radius: 18px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.05);
+}
+
+.exercise-option span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.form-demo {
+  min-height: 320px;
+  border-radius: 26px;
+  border: 1px solid rgba(255,255,255,.08);
+  background:
+    radial-gradient(circle at top, rgba(141,176,255,.2), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02));
+  display: grid;
+  place-items: center;
+}
+
+.demo-stage {
+  position: relative;
+  width: 220px;
+  height: 220px;
+}
+
+.demo-body,
+.demo-limb,
+.demo-bar {
+  position: absolute;
+  left: 50%;
+  transform-origin: center top;
+}
+
+.demo-body {
+  top: 58px;
+  width: 16px;
+  height: 88px;
+  margin-left: -8px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #8db0ff, #8a5cff);
+}
+
+.demo-body::before {
+  content: "";
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  width: 34px;
+  height: 34px;
+  margin-left: -17px;
+  border-radius: 50%;
+  background: #d7e5ff;
+}
+
+.demo-limb {
+  width: 12px;
+  height: 72px;
+  margin-left: -6px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.88);
+}
+
+.limb-a {
+  top: 68px;
+  transform: rotate(34deg);
+}
+
+.limb-b {
+  top: 68px;
+  transform: rotate(-34deg);
+}
+
+.demo-bar {
+  top: 44px;
+  width: 120px;
+  height: 10px;
+  margin-left: -60px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #8db0ff, #d06eff);
+  animation: demoBar 2.2s ease-in-out infinite;
+}
+
+.form-demo.press .limb-a,
+.form-demo.press .limb-b,
+.form-demo.row .limb-a,
+.form-demo.row .limb-b,
+.form-demo.pull .limb-a,
+.form-demo.pull .limb-b,
+.form-demo.raise .limb-a,
+.form-demo.raise .limb-b,
+.form-demo.curl .limb-a,
+.form-demo.curl .limb-b,
+.form-demo.triceps .limb-a,
+.form-demo.triceps .limb-b {
+  animation: demoArms 2.2s ease-in-out infinite;
+}
+
+.form-demo.squat .demo-body,
+.form-demo.lunge .demo-body,
+.form-demo.hinge .demo-body,
+.form-demo.calf .demo-body,
+.form-demo.jump .demo-body {
+  animation: demoBody 2.2s ease-in-out infinite;
+}
+
+.form-demo.core .demo-body,
+.form-demo.cardio .demo-body,
+.form-demo.carry .demo-body {
+  animation: demoBody 1.6s ease-in-out infinite;
+}
+
+.demo-label {
+  margin-top: 14px;
+  text-align: center;
+  color: var(--muted);
+}
+
+@keyframes demoArms {
+  0%, 100% { transform: rotate(34deg); }
+  50% { transform: rotate(88deg); }
+}
+
+@keyframes demoBody {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(18px); }
+}
+
+@keyframes demoBar {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, 18px); }
 }
 
 @media (min-width: 1024px) {
@@ -816,5 +993,9 @@ p {
 
   .floating-add {
     right: 16px;
+  }
+
+  .exercise-picker-grid {
+    grid-template-columns: 1fr;
   }
 }
