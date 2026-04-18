@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FitRank Premium Integrations Test</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    location.hash = "integrations";
+    localStorage.clear();
+    localStorage.setItem("fitrank-user", JSON.stringify({
+      id: "member-2",
+      name: "Premium Member",
+      email: "pro@fitrank.app",
+      goal: "Strength",
+      plan: "PRO"
+    }));
+    localStorage.setItem("fitrank-users", JSON.stringify([
+      { id: "member-2", name: "Premium Member", email: "pro@fitrank.app", goal: "Strength", plan: "PRO", role: "USER", createdAt: "2026-04-01T09:00:00.000Z" },
+      { id: 999, name: "FitRank Admin", email: "admin@fitrank.app", goal: "Administration", plan: "ADMIN", role: "ADMIN", createdAt: "2026-04-01T09:00:00.000Z" }
+    ]));
+    localStorage.setItem("fitrank-health", JSON.stringify({
+      source: "export.xml",
+      steps: 8421,
+      activeCalories: 612,
+      heartRate: 74,
+      recovery: 63,
+      importedAt: "2026-04-18T09:00:00.000Z"
+    }));
+    localStorage.setItem("fitrank-integrations", JSON.stringify({
+      appleHealth: { connected: true, autoSync: false, lastSync: "2026-04-18T09:00:00.000Z", method: "file_import" },
+      appleWatch: { connected: true, autoSync: false, lastSync: "2026-04-18T09:00:00.000Z", method: "file_import" },
+      hevyImport: { connected: true, autoSync: true, lastSync: "2026-04-18T09:05:00.000Z", method: "file_import" }
+    }));
+    localStorage.setItem("fitrank-workouts", JSON.stringify([
+      { id: "w1", title: "Push Day", createdAt: "2026-04-17T09:00:00.000Z", durationMinutes: 55, volume: 4560, calories: 420, likes: 0, comments: [], quote: "Strong", exercises: [{ name: "Bench Press", sets: [{ weight: 90, reps: 6 }] }], health: { heartRateAvg: 118, recovery: 80 } }
+    ]));
+    localStorage.setItem("fitrank-weight", JSON.stringify([
+      { id: "wt1", value: 79.4, createdAt: "2026-04-17T09:00:00.000Z" }
+    ]));
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>

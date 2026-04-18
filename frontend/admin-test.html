@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FitRank Admin Test</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    location.hash = "admin";
+    localStorage.clear();
+    localStorage.setItem("fitrank-user", JSON.stringify({
+      id: 999,
+      name: "FitRank Admin",
+      email: "admin@fitrank.app",
+      goal: "Administration",
+      plan: "ADMIN"
+    }));
+    localStorage.setItem("fitrank-admin", JSON.stringify({
+      email: "admin@fitrank.app",
+      privileges: ["USER_MANAGE", "CONTENT_MANAGE", "ANALYTICS_VIEW"]
+    }));
+    localStorage.setItem("fitrank-users", JSON.stringify([
+      { id: "free-1", name: "Free User", email: "free@fitrank.app", goal: "Cutting", plan: "FREE", role: "USER", createdAt: "2026-04-01T09:00:00.000Z" },
+      { id: "pro-1", name: "Pro User", email: "pro@fitrank.app", goal: "Strength", plan: "PRO", role: "USER", createdAt: "2026-04-01T09:00:00.000Z" },
+      { id: 999, name: "FitRank Admin", email: "admin@fitrank.app", goal: "Administration", plan: "ADMIN", role: "ADMIN", createdAt: "2026-04-01T09:00:00.000Z" }
+    ]));
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>

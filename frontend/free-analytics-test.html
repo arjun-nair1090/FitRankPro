@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FitRank Free Analytics Test</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script>
+    location.hash = "analytics";
+    localStorage.clear();
+    localStorage.setItem("fitrank-user", JSON.stringify({
+      id: "member-1",
+      name: "Free Member",
+      email: "member@fitrank.app",
+      goal: "Strength",
+      plan: "FREE"
+    }));
+    localStorage.setItem("fitrank-users", JSON.stringify([
+      { id: "member-1", name: "Free Member", email: "member@fitrank.app", goal: "Strength", plan: "FREE", role: "USER", createdAt: "2026-04-01T09:00:00.000Z" },
+      { id: 999, name: "FitRank Admin", email: "admin@fitrank.app", goal: "Administration", plan: "ADMIN", role: "ADMIN", createdAt: "2026-04-01T09:00:00.000Z" }
+    ]));
+  </script>
+  <script src="app.js"></script>
+</body>
+</html>

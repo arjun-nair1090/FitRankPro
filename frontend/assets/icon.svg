@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FitRank logo">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f7cff"/>
+      <stop offset="55%" stop-color="#8a5cff"/>
+      <stop offset="100%" stop-color="#b050ff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="108" fill="#0f0f0f"/>
+  <rect x="70" y="228" width="372" height="56" rx="18" fill="url(#bg)"/>
+  <rect x="42" y="190" width="30" height="132" rx="12" fill="#f4f7fb"/>
+  <rect x="82" y="205" width="38" height="102" rx="14" fill="#f4f7fb"/>
+  <rect x="392" y="205" width="38" height="102" rx="14" fill="#f4f7fb"/>
+  <rect x="440" y="190" width="30" height="132" rx="12" fill="#f4f7fb"/>
+  <path d="M184 146h90c46 0 82 35 82 79 0 30-16 56-42 69l58 72h-72l-47-61h-20v61h-62V146zm62 54v51h28c12 0 22-11 22-25 0-15-10-26-22-26h-28z" fill="#f4f7fb"/>
+</svg>
