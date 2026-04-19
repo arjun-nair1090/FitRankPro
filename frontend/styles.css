@@ -281,6 +281,18 @@ p {
   outline: none;
 }
 
+.field-shell select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent url("data:image/svg+xml;utf8,<svg fill='rgba(255,255,255,0.72)' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/></svg>") no-repeat right 12px center;
+  padding-right: 40px;
+}
+
+.field-shell select option {
+  background: #11141e;
+  color: #fff;
+}
+
 .field-shell textarea {
   min-height: 90px;
   resize: vertical;
@@ -435,7 +447,7 @@ p {
 }
 
 .main {
-  padding: 20px 20px 110px;
+  padding: 20px 20px 150px;
 }
 
 .topbar {
@@ -957,7 +969,7 @@ p {
   }
 
   .main {
-    padding-bottom: 120px;
+    padding-bottom: 160px;
   }
 }
 

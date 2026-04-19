@@ -36,45 +36,21 @@
     passwords: load(STORAGE.passwords, {
       "athlete@fitrank.app": "password"
     }),
-    workouts: load(STORAGE.workouts, []),
-    weightLogs: load(STORAGE.weight, []),
-    meals: load(STORAGE.meals, []),
-    healthData: load(STORAGE.health, {
+    workouts: [],
+    weightLogs: [],
+    meals: [],
+    healthData: {
       source: "",
       steps: 0,
       activeCalories: 0,
       heartRate: 0,
       recovery: 0,
       importedAt: null
-    }),
-    routines: load(STORAGE.routines, [
-      { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
-      { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
-      { id: uid(), name: "Legs", days: "Wed", focus: "Quads, Glutes, Hamstrings" },
-      { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
-      { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
-    ]),
-    integrations: load(STORAGE.integrations, {
-      appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-      appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-      hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
-    }),
-    preferences: load(STORAGE.prefs, {
-      units: "kg",
-      distance: "km",
-      restTimer: 90,
-      autoComplete: false,
-      smartSuggestions: true,
-      compactMode: false,
-      accent: "blue-purple",
-      syncFrequency: "Hourly"
-    }),
-    profile: load(STORAGE.profile, {
-      fullName: "Arjun Nair",
-      bio: "Training for strength and longevity.",
-      avatar: "AN",
-      joinDate: "2026-04-01T09:00:00.000Z"
-    }),
+    },
+    routines: [],
+    integrations: {},
+    preferences: {},
+    profile: {},
     pendingMeal: { name: "", calories: "", protein: "", water: "" },
     pendingWeight: "",
     pendingReset: { email: "", password: "", confirm: "", token: "" },
@@ -82,9 +58,89 @@
     dateRange: "30d",
     importPreview: [],
     liveWorkout: loadLiveWorkout(),
-    healthImportDetails: load("fitrank-health-import-details", []),
+    healthImportDetails: [],
     modal: null
   };
+
+  loadUserData(state.user ? state.user.id : null);
+
+  function loadUserData(userId) {
+    if (!userId) {
+      state.workouts = [];
+      state.weightLogs = [];
+      state.meals = [];
+      state.healthData = { source: "", steps: 0, activeCalories: 0, heartRate: 0, recovery: 0, importedAt: null };
+      state.routines = [
+        { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
+        { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
+        { id: uid(), name: "Legs", days: "Wed", focus: "Quads, Glutes, Hamstrings" },
+        { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
+        { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
+      ];
+      state.integrations = {
+        appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
+        appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
+        hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
+      };
+      state.preferences = { units: "kg", distance: "km", restTimer: 90, autoComplete: false, smartSuggestions: true, compactMode: false, accent: "blue-purple", syncFrequency: "Hourly" };
+      state.profile = { fullName: "Athlete", bio: "Training for strength and longevity.", avatar: "FR", joinDate: new Date().toISOString() };
+      state.healthImportDetails = [];
+      return;
+    }
+
+    state.workouts = load(STORAGE.workouts + "-" + userId, load(STORAGE.workouts, []));
+    state.weightLogs = load(STORAGE.weight + "-" + userId, load(STORAGE.weight, []));
+    state.meals = load(STORAGE.meals + "-" + userId, load(STORAGE.meals, []));
+    
+    var defaultHealth = { source: "", steps: 0, activeCalories: 0, heartRate: 0, recovery: 0, importedAt: null };
+    state.healthData = load(STORAGE.health + "-" + userId, load(STORAGE.health, defaultHealth));
+    
+    var defaultRoutines = [
+      { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
+      { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
+      { id: uid(), name: "Legs", days: "Wed", focus: "Quads, Glutes, Hamstrings" },
+      { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
+      { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
+    ];
+    state.routines = load(STORAGE.routines + "-" + userId, load(STORAGE.routines, defaultRoutines));
+    
+    var defaultIntegrations = {
+      appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
+      appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
+      hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
+    };
+    state.integrations = load(STORAGE.integrations + "-" + userId, load(STORAGE.integrations, defaultIntegrations));
+    
+    var defaultPrefs = { units: "kg", distance: "km", restTimer: 90, autoComplete: false, smartSuggestions: true, compactMode: false, accent: "blue-purple", syncFrequency: "Hourly" };
+    state.preferences = load(STORAGE.prefs + "-" + userId, load(STORAGE.prefs, defaultPrefs));
+    
+    var defaultProfile = { fullName: state.user.name, bio: "Training for strength and longevity.", avatar: "FR", joinDate: new Date().toISOString() };
+    state.profile = load(STORAGE.profile + "-" + userId, load(STORAGE.profile, defaultProfile));
+    
+    state.healthImportDetails = load("fitrank-health-import-details-" + userId, load("fitrank-health-import-details", []));
+
+    if (state.workouts.length === 0 && state.weightLogs.length === 0) {
+      loadSeedIfNeeded(userId);
+    }
+  }
+
+  function loadSeedIfNeeded(userId) {
+    if (localStorage.getItem("seed-loaded-" + userId)) return;
+    fetch("seed.json").then(function(res) {
+      if (!res.ok) throw new Error();
+      return res.json();
+    }).then(function(data) {
+      state.workouts = data.workouts || [];
+      state.healthData = data.healthData || state.healthData;
+      state.weightLogs = data.weightLogs || [];
+      state.integrations = data.integrations || state.integrations;
+      localStorage.setItem("seed-loaded-" + userId, "true");
+      persistAll();
+      render();
+    }).catch(function() {
+      localStorage.setItem("seed-loaded-" + userId, "true");
+    });
+  }
 
   if (!state.users.length) {
     state.users = [
@@ -97,12 +153,18 @@
 
   window.addEventListener("hashchange", function () {
     state.page = location.hash.replace("#", "") || (state.user ? (state.admin ? "admin" : "dashboard") : "login");
+    if (state.page === "signup" || state.page === "login") {
+      state.authMode = state.page;
+    }
     render();
   });
 
   setInterval(function () {
     if (state.user && state.page === "workouts") {
-      render();
+      var timerNode = document.getElementById("workout-timer-display");
+      if (timerNode) {
+        timerNode.innerText = workoutTimer();
+      }
     }
   }, 1000);
 
@@ -165,15 +227,18 @@
     save(STORAGE.admin, state.admin);
     save(STORAGE.users, state.users);
     save(STORAGE.passwords, state.passwords);
-    save(STORAGE.workouts, state.workouts);
-    save(STORAGE.weight, state.weightLogs);
-    save(STORAGE.meals, state.meals);
-    save(STORAGE.health, state.healthData);
-    save(STORAGE.routines, state.routines);
-    save(STORAGE.integrations, state.integrations);
-    save(STORAGE.prefs, state.preferences);
-    save(STORAGE.profile, state.profile);
-    save("fitrank-health-import-details", state.healthImportDetails);
+    
+    if (state.user) {
+      save(STORAGE.workouts + "-" + state.user.id, state.workouts);
+      save(STORAGE.weight + "-" + state.user.id, state.weightLogs);
+      save(STORAGE.meals + "-" + state.user.id, state.meals);
+      save(STORAGE.health + "-" + state.user.id, state.healthData);
+      save(STORAGE.routines + "-" + state.user.id, state.routines);
+      save(STORAGE.integrations + "-" + state.user.id, state.integrations);
+      save(STORAGE.prefs + "-" + state.user.id, state.preferences);
+      save(STORAGE.profile + "-" + state.user.id, state.profile);
+      save("fitrank-health-import-details-" + state.user.id, state.healthImportDetails);
+    }
   }
 
   function hydrateResetContextFromUrl() {
@@ -197,6 +262,15 @@
   }
 
   function ensureRouteAccess() {
+    if (state.user) {
+      for (var i = 0; i < state.users.length; i += 1) {
+        if (state.users[i].email === state.user.email) {
+          state.user.plan = state.users[i].plan;
+          break;
+        }
+      }
+    }
+
     if (!state.user && state.page !== "login" && state.page !== "signup") {
       state.page = "login";
       location.hash = "login";
@@ -253,7 +327,7 @@
             '<div>' +
               '<p class="eyebrow">Web-first training OS</p>' +
               '<h1><span class="gradient-text">Premium</span> workout tracking designed to actually work.</h1>' +
-              '<p>Responsive dashboard, honest integrations, live logging, routines, nutrition, imports, premium coaching tools, and real local account management.</p>' +
+              '<p>Responsive dashboard, seamless integrations, live logging, routines, nutrition, imports, premium coaching tools, and real local account management.</p>' +
               '<div class="pill-row">' +
                 '<span>Apple Health import</span>' +
                 '<span>Hevy import</span>' +
@@ -355,7 +429,7 @@
           '<div class="field-shell search-shell"><input value="' + escapeAttr(state.search) + '" placeholder="Search exercises, routines, history..." data-input="search"></div>' +
           '<div class="topbar-right">' +
             (!state.admin ? '<button class="btn" data-nav="workouts">Quick Start Workout</button>' : "") +
-            '<div class="user-chip"><div class="avatar">' + escapeHtml((state.user.name || "FR").slice(0, 2).toUpperCase()) + "</div><div><strong>" + escapeHtml(state.user.name) + "</strong><p>" + escapeHtml(state.user.email) + '</p></div><button class="btn-ghost" data-action="logout">Logout</button></div>' +
+            '<div class="user-chip"><div class="avatar">' + escapeHtml((state.user.name || "FR").slice(0, 2).toUpperCase()) + "</div><div><strong>" + escapeHtml(state.user.name) + "</strong><p>" + escapeHtml(state.user.email) + '</p></div><button class="btn-ghost" data-action="logout">Log out</button></div>' +
           "</div>" +
         "</div>" +
       "</div>";
@@ -425,7 +499,7 @@
       '<div class="page-head">' +
         '<div><p class="eyebrow">Live Workout Tracker</p><h2>' + escapeHtml(state.liveWorkout.name) + '</h2><p>Start blank, choose exercises from the library, and log only what you actually perform.</p></div>' +
         '<div class="button-row">' +
-          '<div class="mini-card"><strong>' + workoutTimer() + '</strong><p>Running Timer</p></div>' +
+          '<div class="mini-card"><strong id="workout-timer-display">' + workoutTimer() + '</strong><p>Running Timer</p></div>' +
           '<div class="mini-card"><strong>' + String(state.liveWorkout.exercises.length) + '</strong><p>Exercises Added</p></div>' +
           '<button class="btn" data-action="finish-workout">Finish Workout</button>' +
         "</div>" +
@@ -676,7 +750,7 @@
           '<div class="button-row"><button class="btn-secondary">Email Preferences</button><button class="btn-secondary">Delete Account</button></div>' +
         "</section>" +
         '<section class="glass panel"><h3>Workout Preferences</h3>' +
-          switchRow("Auto complete sets", state.preferences.autoComplete, "toggle-pref", "autoComplete") +
+          switchRow("Autocomplete sets", state.preferences.autoComplete, "toggle-pref", "autoComplete") +
           switchRow("Smart suggestions", state.preferences.smartSuggestions, "toggle-pref", "smartSuggestions") +
           '<div class="form-row">' +
             select("pref-units", state.preferences.units, ["kg", "lbs"]) +
@@ -691,7 +765,8 @@
           switchRow("Goal milestone alerts", true, "noop", "") +
         "</section>" +
         '<section class="glass panel"><h3>Data & Privacy</h3><div class="button-row">' +
-          (premium ? '<button class="btn-secondary" data-action="export-data">Export JSON</button>' : '<span class="badge">Premium export</span>') +
+          '<button class="' + (premium ? 'btn' : 'btn-secondary') + '" data-action="export-data">Export JSON</button>' +
+          (!premium ? '<span class="badge">Export format locked</span>' : '') +
           '<button class="btn-secondary" data-action="clear-cache">Clear Cache</button></div></section>' +
         '<section class="glass panel"><h3>Health & Device Sync</h3>' +
           switchRow("Apple Health import available", state.integrations.appleHealth.connected, "toggle-integration", "appleHealth") +
@@ -912,18 +987,26 @@
     if (!data.values.length || !hasPositive(data.values)) return "<p>No data yet. Save workouts to build this chart.</p>";
     var width = 520;
     var height = 220;
+    var chartH = height - 30; // Leave room for labels
     var max = Math.max.apply(null, data.values) || 1;
     var points = [];
+    var labelsSvg = "";
+    
     for (var i = 0; i < data.values.length; i += 1) {
       var x = data.values.length === 1 ? width / 2 : 20 + (i * ((width - 40) / (data.values.length - 1)));
-      var y = height - 20 - ((data.values[i] / max) * (height - 40));
+      var y = chartH - 20 - ((data.values[i] / max) * (chartH - 40));
       points.push(x + "," + y);
+      
+      if (data.labels && data.labels[i] && (data.labels.length <= 8 || i % Math.ceil(data.labels.length/6) === 0 || i === data.values.length - 1)) {
+        var labelText = String(data.labels[i]).slice(5); // Show MM-DD roughly if YYYY-MM-DD
+        labelsSvg += '<text x="' + x + '" y="' + (height - 5) + '" fill="rgba(255,255,255,.45)" font-size="11" text-anchor="middle">' + escapeHtml(labelText) + '</text>';
+      }
     }
     return '<div class="line-chart"><svg class="line-svg" viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none"><polyline fill="none" stroke="#8db0ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="' + points.join(" ") + '"></polyline>' +
       points.map(function (point) {
         var xy = point.split(",");
         return '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="5" fill="#b050ff"></circle>';
-      }).join("") +
+      }).join("") + labelsSvg +
       "</svg></div>";
   }
 
@@ -1008,6 +1091,7 @@
 
     if (action === "toggle-auth") {
       state.authMode = state.authMode === "login" ? "signup" : "login";
+      setPage(state.authMode);
       state.authError = "";
       state.authInfo = "";
       render();
@@ -1029,7 +1113,9 @@
     } else if (action === "logout") {
       state.user = null;
       state.admin = null;
+      loadUserData(null);
       setPage("login");
+      state.authMode = "login";
       render();
     } else if (action === "finish-workout") {
       finishWorkout();
@@ -1199,6 +1285,7 @@
       };
       state.admin = { email: email, privileges: ["USER_MANAGE", "CONTENT_MANAGE", "ANALYTICS_VIEW"] };
       syncCurrentUserRecord();
+      loadUserData(state.user.id);
       setPage("admin");
       toast("Logged in with admin privileges.");
       render();
@@ -1220,6 +1307,7 @@
     };
     state.passwords[email] = password;
     state.admin = null;
+    loadUserData(state.user.id);
     state.profile.fullName = state.user.name;
     state.profile.avatar = initials(state.user.name);
     syncCurrentUserRecord();
@@ -1993,16 +2081,24 @@
       return new Date(meal.createdAt).getTime() >= Date.now() - rangeDays() * 24 * 60 * 60 * 1000;
     }).reverse();
     var dailyWorkoutCounts = aggregateByDay(workouts, function () { return 1; });
-    var bodyWeightValues = state.weightLogs.slice(0, 12).reverse().map(function (entry) { return Number(entry.value || 0); });
+    var bodyWeightEntries = state.weightLogs.slice(0, 12).reverse();
+    var bodyWeightValues = bodyWeightEntries.map(function (entry) { return Number(entry.value || 0); });
+    var bodyWeightLabels = bodyWeightEntries.map(function (entry) { return String(entry.createdAt || "").slice(0,10); });
     if (!bodyWeightValues.length && state.healthImportDetails.length) {
       bodyWeightValues = extractHealthWeightSeries();
     }
     return {
-      strength: chartData(workouts.map(function (workout) { return maxWeight(workout); })),
+      strength: chartData(
+        workouts.map(function (workout) { return maxWeight(workout); }),
+        workouts.map(function (workout) { return String(workout.createdAt).slice(0,10); })
+      ),
       volume: chartData(workouts.map(function (workout) { return Math.round(workout.volume); })),
-      consistency: chartData(dailyWorkoutCounts),
-      bodyWeight: chartData(bodyWeightValues),
-      heartRate: chartData(workouts.map(function (workout) { return workout.health.heartRateAvg || 0; })),
+      consistency: { values: dailyWorkoutCounts.values, labels: dailyWorkoutCounts.labels },
+      bodyWeight: chartData(bodyWeightValues, bodyWeightLabels),
+      heartRate: chartData(
+        workouts.map(function (workout) { return workout.health.heartRateAvg || 0; }),
+        workouts.map(function (workout) { return String(workout.createdAt).slice(0,10); })
+      ),
       calories: chartData(mealEntries.map(function (meal) { return meal.calories || 0; })),
       prs: prList(),
       heat: muscleHeat(workouts),
@@ -2027,8 +2123,8 @@
     }).slice(0, 8).reverse();
   }
 
-  function chartData(values) {
-    return { values: values.length ? values : [] };
+  function chartData(values, labels) {
+    return { values: values.length ? values : [], labels: labels || [] };
   }
 
   function exerciseOptions() {
@@ -2132,7 +2228,9 @@
       var key = String(workout.createdAt || "").slice(0, 10);
       map[key] = (map[key] || 0) + (Number(picker(workout)) || 0);
     });
-    return Object.keys(map).sort().map(function (key) { return map[key]; });
+    var labels = Object.keys(map).sort();
+    var values = labels.map(function (key) { return map[key]; });
+    return { labels: labels, values: values };
   }
 
   function computeRecoveryScore(workouts) {
