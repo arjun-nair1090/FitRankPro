@@ -1008,7 +1008,6 @@
         (lbl ? '<span style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px;white-space:nowrap;transform:rotate(-45deg);transform-origin:left center;">' + escapeHtml(lbl) + '</span>' : '') +
         '</div>';
     }).join("") + "</div>";
-  }).join("") + "</div>";
   }
 
   function renderLineChart(data) {
@@ -1024,7 +1023,6 @@
       var x = data.values.length === 1 ? width / 2 : 20 + (i * ((width - 40) / (data.values.length - 1)));
       var y = chartH - 20 - ((data.values[i] / max) * (chartH - 40));
       points.push(x + "," + y);
-      labelsSvg += '<text x="' + x + '" y="' + (y - 12) + '" fill="rgba(255,255,255,0.8)" font-size="10" text-anchor="middle">' + Math.round(data.values[i]*10)/10 + '</text>';
       labelsSvg += '<text x="' + x + '" y="' + (y - 12) + '" fill="rgba(255,255,255,0.8)" font-size="10" text-anchor="middle">' + Math.round(data.values[i]*10)/10 + '</text>';
       
       if (data.labels && data.labels[i] && (data.labels.length <= 8 || i % Math.ceil(data.labels.length/6) === 0 || i === data.values.length - 1)) {
@@ -2725,7 +2723,7 @@
   }
 
   function labelize(value) {
-    return String(value).replace(/([xZ])/g, " $1").replace(/^./, function (char) { return char.toUpperCase(); });
+    return String(value).replace(/([A-Z])/g, " $1").replace(/^./, function (char) { return char.toUpperCase(); });
   }
 
   function hasPositive(values) {
