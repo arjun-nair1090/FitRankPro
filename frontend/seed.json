@@ -15103,25 +15103,25 @@
     "activeCalories": 156094,
     "heartRate": 124,
     "recovery": 50,
-    "importedAt": "2026-04-19T20:21:26.791949Z"
+    "importedAt": "2026-04-20T12:42:00.922816Z"
   },
   "integrations": {
     "appleHealth": {
       "connected": true,
       "autoSync": false,
-      "lastSync": "2026-04-19T20:21:26.791949Z",
+      "lastSync": "2026-04-20T12:42:00.922816Z",
       "method": "seed"
     },
     "appleWatch": {
       "connected": true,
       "autoSync": false,
-      "lastSync": "2026-04-19T20:21:26.791949Z",
+      "lastSync": "2026-04-20T12:42:00.922816Z",
       "method": "seed"
     },
     "hevyImport": {
       "connected": true,
       "autoSync": true,
-      "lastSync": "2026-04-19T20:21:26.791949Z",
+      "lastSync": "2026-04-20T12:42:00.922816Z",
       "method": "seed"
     }
   }

@@ -1,0 +1,13 @@
+# FitRank Git Ignore
+
+# Java compiled classes
+backend/out/
+*.class
+
+# Temporary and system files
+.DS_Store
+Thumbs.db
+*.tmp
+
+# User data and logs (optional, but keep it clean)
+*.log

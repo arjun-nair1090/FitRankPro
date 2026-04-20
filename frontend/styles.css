@@ -889,18 +889,25 @@ p {
 }
 
 .form-demo.press .limb-a,
-.form-demo.press .limb-b,
 .form-demo.row .limb-a,
-.form-demo.row .limb-b,
 .form-demo.pull .limb-a,
-.form-demo.pull .limb-b,
 .form-demo.raise .limb-a,
-.form-demo.raise .limb-b,
 .form-demo.curl .limb-a,
-.form-demo.curl .limb-b,
 .form-demo.triceps .limb-a,
-.form-demo.triceps .limb-b {
-  animation: demoArms 2.2s ease-in-out infinite;
+.form-demo.generic .limb-a,
+.form-demo.carry .limb-a {
+  animation: demoLimbA 2.2s ease-in-out infinite;
+}
+
+.form-demo.press .limb-b,
+.form-demo.row .limb-b,
+.form-demo.pull .limb-b,
+.form-demo.raise .limb-b,
+.form-demo.curl .limb-b,
+.form-demo.triceps .limb-b,
+.form-demo.generic .limb-b,
+.form-demo.carry .limb-b {
+  animation: demoLimbB 2.2s ease-in-out infinite;
 }
 
 .form-demo.squat .demo-body,
@@ -911,10 +918,35 @@ p {
   animation: demoBody 2.2s ease-in-out infinite;
 }
 
+.form-demo.squat .limb-a,
+.form-demo.lunge .limb-a,
+.form-demo.hinge .limb-a,
+.form-demo.calf .limb-a,
+.form-demo.jump .limb-a {
+  animation: demoLegA 2.2s ease-in-out infinite;
+}
+
+.form-demo.squat .limb-b,
+.form-demo.lunge .limb-b,
+.form-demo.hinge .limb-b,
+.form-demo.calf .limb-b,
+.form-demo.jump .limb-b {
+  animation: demoLegB 2.2s ease-in-out infinite;
+}
+
 .form-demo.core .demo-body,
-.form-demo.cardio .demo-body,
-.form-demo.carry .demo-body {
-  animation: demoBody 1.6s ease-in-out infinite;
+.form-demo.cardio .demo-body {
+  animation: demoBody 1.4s ease-in-out infinite;
+}
+
+.form-demo.core .limb-a,
+.form-demo.cardio .limb-a {
+  animation: demoLimbA 1.4s ease-in-out infinite;
+}
+
+.form-demo.core .limb-b,
+.form-demo.cardio .limb-b {
+  animation: demoLimbB 1.4s ease-in-out infinite;
 }
 
 .demo-label {
@@ -923,9 +955,24 @@ p {
   color: var(--muted);
 }
 
-@keyframes demoArms {
+@keyframes demoLimbA {
   0%, 100% { transform: rotate(34deg); }
   50% { transform: rotate(88deg); }
+}
+
+@keyframes demoLimbB {
+  0%, 100% { transform: rotate(-34deg); }
+  50% { transform: rotate(-88deg); }
+}
+
+@keyframes demoLegA {
+  0%, 100% { transform: rotate(14deg); }
+  50% { transform: rotate(44deg); }
+}
+
+@keyframes demoLegB {
+  0%, 100% { transform: rotate(-14deg); }
+  50% { transform: rotate(-44deg); }
 }
 
 @keyframes demoBody {

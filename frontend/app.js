@@ -88,13 +88,8 @@
       return;
     }
 
-    state.workouts = load(STORAGE.workouts + "-" + userId, load(STORAGE.workouts, []));
-    state.weightLogs = load(STORAGE.weight + "-" + userId, load(STORAGE.weight, []));
-    state.meals = load(STORAGE.meals + "-" + userId, load(STORAGE.meals, []));
-    
+    // Load ONLY from user-namespaced keys - never fall back to shared keys (prevents cross-user data leaks)
     var defaultHealth = { source: "", steps: 0, activeCalories: 0, heartRate: 0, recovery: 0, importedAt: null };
-    state.healthData = load(STORAGE.health + "-" + userId, load(STORAGE.health, defaultHealth));
-    
     var defaultRoutines = [
       { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
       { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
@@ -102,17 +97,20 @@
       { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
       { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
     ];
-    state.routines = load(STORAGE.routines + "-" + userId, load(STORAGE.routines, defaultRoutines));
-    
     var defaultIntegrations = {
       appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
       appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
       hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
     };
-    state.integrations = load(STORAGE.integrations + "-" + userId, load(STORAGE.integrations, defaultIntegrations));
-    
     var defaultPrefs = { units: "kg", distance: "km", restTimer: 90, autoComplete: false, smartSuggestions: true, compactMode: false, accent: "blue-purple", syncFrequency: "Hourly" };
-    state.preferences = load(STORAGE.prefs + "-" + userId, load(STORAGE.prefs, defaultPrefs));
+
+    state.workouts = load(STORAGE.workouts + "-" + userId, []);
+    state.weightLogs = load(STORAGE.weight + "-" + userId, []);
+    state.meals = load(STORAGE.meals + "-" + userId, []);
+    state.healthData = load(STORAGE.health + "-" + userId, defaultHealth);
+    state.routines = load(STORAGE.routines + "-" + userId, defaultRoutines);
+    state.integrations = load(STORAGE.integrations + "-" + userId, defaultIntegrations);
+    state.preferences = load(STORAGE.prefs + "-" + userId, defaultPrefs);
     
     var defaultProfile = { fullName: state.user.name, bio: "Training for strength and longevity.", avatar: "FR", joinDate: new Date().toISOString() };
     state.profile = load(STORAGE.profile + "-" + userId, load(STORAGE.profile, defaultProfile));
@@ -120,12 +118,14 @@
     state.healthImportDetails = load("fitrank-health-import-details-" + userId, load("fitrank-health-import-details", []));
 
     if (state.workouts.length === 0 && state.weightLogs.length === 0) {
-      loadSeedIfNeeded(userId);
+      if (state.user && state.user.email === "admin@fitrank.app") {
+        loadSeedIfNeeded(userId);
+      }
     }
   }
 
   function loadSeedIfNeeded(userId) {
-    if (localStorage.getItem("seed-loaded-" + userId)) return;
+    if (localStorage.getItem("seed-loaded-v4-" + userId)) return;
     fetch("seed.json").then(function(res) {
       if (!res.ok) throw new Error();
       return res.json();
@@ -134,11 +134,11 @@
       state.healthData = data.healthData || state.healthData;
       state.weightLogs = data.weightLogs || [];
       state.integrations = data.integrations || state.integrations;
-      localStorage.setItem("seed-loaded-" + userId, "true");
+      localStorage.setItem("seed-loaded-v4-" + userId, "true");
       persistAll();
       render();
     }).catch(function() {
-      localStorage.setItem("seed-loaded-" + userId, "true");
+      localStorage.setItem("seed-loaded-v4-" + userId, "true");
     });
   }
 
@@ -487,7 +487,7 @@
         '<section class="glass panel"><h3>Recent Workouts</h3>' +
           (recentWorkouts().length
             ? recentWorkouts().map(function (workout) {
-                return '<div class="mini-card"><strong>' + escapeHtml(workout.title) + '</strong><p>' + formatDateTime(workout.createdAt) + ' â€¢ ' + workout.durationMinutes + ' min â€¢ ' + number(workout.volume) + ' kg volume</p></div>';
+                return '<div class="mini-card"><strong>' + escapeHtml(workout.title) + '</strong><p>' + formatDateTime(workout.createdAt) + ' | ' + workout.durationMinutes + ' min | ' + number(workout.volume) + ' kg</p></div>';
               }).join('')
             : '<p>No workouts yet. Start a session to populate your dashboard.</p>') +
         '</section>' +
@@ -552,9 +552,10 @@
       '<div class="page-head"><div><p class="eyebrow">Routines</p><h2>Saved Templates</h2></div><button class="btn" data-action="create-routine">Create Routine</button></div>' +
       '<div class="routine-grid cards-two">' +
         state.routines.map(function (routine) {
-          return '<div class="glass panel routine-card"><h3>' + escapeHtml(routine.name) + "</h3><p>" + escapeHtml(routine.focus) + "</p><p>" + escapeHtml(routine.days) + '</p><div class="button-row"><button class="btn" data-action="start-routine" data-routine="' + routine.id + '">Start</button><button class="btn-secondary" data-action="edit-routine" data-routine="' + routine.id + '">Edit</button><button class="btn-secondary" data-action="duplicate-routine" data-routine="' + routine.id + '">Duplicate</button><button class="btn-secondary" data-action="delete-routine" data-routine="' + routine.id + '">Delete</button></div></div>';
+          var exCount = (routine.exercises && routine.exercises.length) || 0;
+          return '<div class="glass panel routine-card"><h3>' + escapeHtml(routine.name) + '</h3><p>' + escapeHtml(routine.focus) + '</p><p>' + escapeHtml(routine.days) + (exCount ? ' | ' + exCount + ' exercises' : '') + '</p><div class="button-row"><button class="btn" data-action="start-routine" data-routine="' + routine.id + '">Start</button><button class="btn-secondary" data-action="edit-routine" data-routine="' + routine.id + '">Edit</button><button class="btn-secondary" data-action="duplicate-routine" data-routine="' + routine.id + '">Duplicate</button><button class="btn-secondary" data-action="delete-routine" data-routine="' + routine.id + '">Delete</button></div></div>';
         }).join("") +
-      "</div>";
+      '</div>';
   }
 
   function renderProgress() {
@@ -568,29 +569,36 @@
 
     return '' +
       '<div class="page-head">' +
-        '<div><p class="eyebrow">Progress & Analytics</p><h2>Real charts from your saved data</h2></div>' +
+        '<div><p class="eyebrow">Progress & Analytics</p><h2>Your training history visualised</h2></div>' +
         '<div class="button-row">' +
-          select('range-filter', state.dateRange, ['7d', '30d', '90d']) +
+          select('range-filter', state.dateRange, ['3d', '7d', '1m', '1y']) +
           select('exercise-filter', state.selectedExercise, exerciseOptions()) +
           '<button class="btn-secondary" data-action="export-data">Export Data</button>' +
         '</div>' +
       '</div>' +
       '<div class="cards-two">' +
-        chartCard('Strength progression', renderLineChart(analytics.strength)) +
-        chartCard('Volume lifted', renderBars(analytics.volume.values)) +
-        chartCard('Workout consistency by day', renderLineChart(analytics.consistency)) +
-        chartCard('Body weight graph', renderLineChart(analytics.bodyWeight)) +
-        chartCard('Heart rate trend analysis', renderLineChart(analytics.heartRate)) +
-        chartCard('Nutrition calories logged', renderBars(analytics.calories.values)) +
+        chartCard('Monthly Volume (kg)', renderBars(analytics.monthlyVolume)) +
+        chartCard('Sessions per Month', renderBars(analytics.monthlySessions)) +
+        chartCard('Strength: ' + analytics.topExercise, renderLineChart(analytics.strength)) +
+        chartCard('Body Weight (kg)', renderLineChart(analytics.bodyWeight)) +
+        chartCard('Workout Consistency (days)', renderLineChart(analytics.consistency)) +
+        chartCard('Muscle Group Frequency', '<div class="heatmap" style="margin-top:4px;">' + heatCards + '</div>') +
       '</div>' +
       '<div class="cards-three">' +
         '<section class="glass panel"><h3>PR Tracker</h3>' + prCards + '</section>' +
-        '<section class="glass panel"><h3>Muscle Group Frequency</h3><div class="heatmap">' + heatCards + '</div></section>' +
+        '<section class="glass panel"><h3>All-time Stats</h3>' +
+          '<div class="stats-four">' +
+            stat('Total Workouts', String(state.workouts.length), 'Logged') +
+            stat('Total Volume', number(analytics.totalVolume) + ' kg', 'All time') +
+            stat('Best Month', analytics.bestMonth, 'By volume') +
+            stat('Avg Session', number(Math.round(analytics.averageVolume)) + ' kg', 'Per workout') +
+          '</div>' +
+        '</section>' +
         '<section class="glass panel"><h3>Log Body Weight</h3>' +
-          field('Weight', '<input data-input="weight-log" value="' + escapeAttr(state.pendingWeight) + '" placeholder="Enter body weight">') +
+          field('Weight (kg)', '<input data-input="weight-log" value="' + escapeAttr(state.pendingWeight) + '" placeholder="e.g. 72.5">') +
           '<div class="button-row"><button class="btn" data-action="save-weight">Save Weight</button></div>' +
           '<div style="height:12px"></div>' +
-          '<div class="mini-card"><strong>' + analytics.recoveryScore + '%</strong><p>Recovery score from imported heart-rate context and workout consistency.</p></div>' +
+          '<div class="mini-card"><strong>' + analytics.recoveryScore + '%</strong><p>Recovery score from imported heart-rate data.</p></div>' +
         '</section>' +
       '</div>';
   }
@@ -627,7 +635,7 @@
           (analytics.averageVolume > 0 ? '<div class="mini-card"><strong>Volume trend</strong><p>' + (analytics.averageVolume > 3000 ? 'Strong volume. Consider deload after 3 more sessions.' : 'Volume is moderate. Add one set per exercise to progress.') + '</p></div>' : '') +
           '<div class="pill-row" style="margin-top:12px"><span>' + analytics.workoutCount + ' sessions logged</span><span>' + (analytics.importedHealth ? 'Health data active' : 'Import Apple Health for deeper insights') + '</span></div>' +
         '</section>' +
-        '<section class="glass panel"><h3>Goal Pace Forecast ðŸŽ¯</h3>' +
+        '<section class="glass panel"><h3>Goal Pace Forecast &#x1F3AF;</h3>' +
           '<div class="mini-card"><strong>' + forecast.label + '</strong><p>' + forecast.detail + '</p></div>' +
           '<div style="height:10px"></div>' +
           '<div class="mini-card"><strong>Current pace</strong><p>' + forecast.pace + ' workouts/week on average</p></div>' +
@@ -639,7 +647,7 @@
             return '<div class="mini-card"><strong>' + escapeHtml(item.exercise) + '</strong><p>Best set: ' + item.weight + ' kg Ã— ' + item.reps + ' reps â†’ Estimated 1RM: <strong>' + item.oneRM + ' kg</strong></p></div>';
           }).join('') : '<p>Log sets with weight and reps to see 1RM estimates.</p>') +
         '</section>' +
-        '<section class="glass panel"><h3>Muscle Group Heatmap ðŸ”¥</h3>' +
+        '<section class="glass panel"><h3>Muscle Group Heatmap &#x1F525;</h3>' +
           '<div class="heatmap">' + heatCards + '</div>' +
           '<div style="height:12px"></div>' +
           '<p style="font-size:13px;color:var(--muted)">Based on ' + analytics.workoutCount + ' logged sessions. Darker = more volume.</p>' +
@@ -684,7 +692,7 @@
           (hasHealth
             ? "Imported from " + escapeHtml(state.healthData.source || "Health export") + " on " + formatDateTime(state.integrations.appleHealth.lastSync)
             : "Direct browser access is not possible. Import an Apple Health export file now, or pair this app with a native iOS bridge later.") +
-          '</p><div class="button-row"><button class="btn-secondary" data-action="import-health-export">Import Health Export</button><button class="btn-secondary" data-action="toggle-auto-sync" data-key="appleHealth">Import Status ' + (state.integrations.appleHealth.autoSync ? "Tracked" : "Manual") + '</button></div><input id="health-import-file" class="hidden" type="file" data-input="health-file" accept=".xml,.json,.txt"></section>' +
+          '</p><div class="button-row"><label class="btn-secondary" style="cursor:pointer;">Import Health Export<input class="hidden" type="file" data-input="health-file" accept=".xml,.json,.txt" style="position:absolute;opacity:0;width:0;height:0;"></label><button class="btn-secondary" data-action="toggle-auto-sync" data-key="appleHealth">Import Status ' + (state.integrations.appleHealth.autoSync ? "Tracked" : "Manual") + '</button></div></section>' +
         '<section class="glass panel integration-card"><h3>Apple Watch</h3><p>' +
           (state.integrations.appleWatch.connected
             ? "Watch-derived heart rate was detected in the imported health export."
@@ -694,11 +702,12 @@
           (state.integrations.hevyImport.connected
             ? "Last import " + formatDateTime(state.integrations.hevyImport.lastSync)
             : "Import actual CSV or JSON exports from Hevy to merge workouts, routines, and weight history.") +
-          '</p><div class="button-row"><button class="btn" data-action="import-hevy-file">Import Hevy File</button>' +
+          '</p><div class="button-row">' +
+          '<label class="btn" style="cursor:pointer;">Import Hevy File<input class="hidden" type="file" data-input="hevy-file" accept=".csv,.json" style="position:absolute;opacity:0;width:0;height:0;"></label>' +
           (premium
             ? '<button class="btn-secondary" data-action="toggle-auto-sync" data-key="hevyImport">Duplicate Detection ' + (state.integrations.hevyImport.autoSync ? "On" : "Off") + '</button>'
             : '<span class="badge">Duplicate detection is premium</span>') +
-          '</div><input id="hevy-import-file" class="hidden" type="file" data-input="hevy-file" accept=".csv,.json"></section>' +
+          '</div></section>' +
         '<section class="glass panel integration-card"><h3>Premium Device Insights</h3><p>' +
           (premium ? "Premium insights are unlocked for this user." : "Premium device insights are restricted. Ask an admin to upgrade this account to unlock deeper device analytics.") +
           '</p><div class="button-row">' + (premium ? '<span class="badge">Premium active</span>' : '<span class="badge">Admin upgrade required</span>') + "</div></section>" +
@@ -794,38 +803,38 @@
                     return '<div class="mini-card"><strong>' + escapeHtml(item.exercise) + '</strong><p>' + item.weight + ' kg Ã— ' + item.reps + ' = <strong>' + item.oneRM + ' kg 1RM</strong></p></div>';
                   }).join('')
                 : '<p>No sets logged yet. Start tracking lifts to see your 1RM estimates automatically.</p>')
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to see live 1RM estimates for every exercise.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to see live 1RM estimates for every exercise.</p></div>') +
         '</section>' +
-        '<section class="glass panel"><h3>Goal Pace Forecast ðŸŽ¯</h3><p>Projects how many weeks until you hit 100% of your weekly training goal at current pace.</p>' +
+        '<section class="glass panel"><h3>Goal Pace Forecast &#x1F3AF;</h3><p>Projects how many weeks until you hit 100% of your weekly training goal at current pace.</p>' +
           (premium
             ? '<div class="mini-card"><strong>' + forecast.label + '</strong><p>' + forecast.detail + '</p></div><div style="height:10px"></div><div class="mini-card"><strong>Current pace: ' + forecast.pace + ' sessions/week</strong><p>Goal: 4 sessions/week</p></div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to see your goal timeline forecast.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to see your goal timeline forecast.</p></div>') +
         '</section>' +
       '</div>' +
       '<div class="cards-two">' +
-        '<section class="glass panel"><h3>AI Coaching Insights ðŸ¤–</h3><p>Rule-based analysis of your training data to suggest your next move.</p>' +
+        '<section class="glass panel"><h3>AI Coaching Insights &#x1F916;</h3><p>Rule-based analysis of your training data to suggest your next move.</p>' +
           (premium
             ? aiInsights.map(function (insight) {
                 return '<div class="mini-card"><strong>' + escapeHtml(insight.title) + '</strong><p>' + escapeHtml(insight.text) + '</p></div>';
               }).join('')
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to get AI coaching recommendations tailored to your workout history.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to get AI coaching recommendations tailored to your workout history.</p></div>') +
         '</section>' +
         '<section class="glass panel"><h3>Priority Data Export ðŸ“¤</h3><p>Export all your workout history, meals, weight logs, and health data in JSON or CSV format.</p>' +
           (premium
             ? '<div class="button-row"><button class="btn" data-action="export-data">Export JSON</button><button class="btn-secondary" data-action="export-csv">Export CSV</button></div><div style="height:12px"></div><div class="mini-card"><strong>Data is yours</strong><p>Full export includes all workouts, sets, meals, weight logs, and imported health data.</p></div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to export your full fitness history.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to export your full fitness history.</p></div>') +
         '</section>' +
       '</div>' +
       '<div class="cards-two">' +
-        '<section class="glass panel"><h3>Animated Form Demos ðŸŽ¥</h3><p>For every exercise in your workout, tap Show Form to see an animated coaching guide with cues. Premium-exclusive.</p>' +
+        '<section class="glass panel"><h3>Animated Form Demos &#x1F3A5;</h3><p>For every exercise in your workout, tap Show Form to see an animated coaching guide with cues. Premium-exclusive.</p>' +
           (premium
             ? '<div class="success-banner">Active â€” tap â€œShow Formâ€ on any exercise during a workout.</div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to access animated form demos for all 100+ exercises.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to access animated form demos for all 100+ exercises.</p></div>') +
         '</section>' +
-        '<section class="glass panel"><h3>Hevy Smart Deduplication ðŸ”„</h3><p>When importing Hevy exports, premium users get duplicate detection that prevents double-counting past workouts.</p>' +
+        '<section class="glass panel"><h3>Hevy Smart Deduplication &#x1F504;</h3><p>When importing Hevy exports, premium users get duplicate detection that prevents double-counting past workouts.</p>' +
           (premium
             ? '<div class="success-banner">Active â€” duplicate workouts are automatically skipped on Hevy imports.</div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>ðŸ”’ Premium only</strong><p>Upgrade to enable smart deduplication during Hevy imports.</p></div>') +
+            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to enable smart deduplication during Hevy imports.</p></div>') +
         '</section>' +
       '</div>' +
       '<div class="cards-three">' +
@@ -873,7 +882,7 @@
                 return '<div class="mini-card">' +
                   '<strong>' + escapeHtml(user.name) + '</strong>' +
                   '<p style="margin:3px 0">' + escapeHtml(user.email) + '</p>' +
-                  '<p style="margin:3px 0;font-size:13px">Goal: ' + escapeHtml(user.goal) + ' \u2022 <span' + planStyle + '>' + escapeHtml(user.plan) + '</span> \u2022 Joined ' + formatShortDate(user.createdAt || new Date().toISOString()) + '</p>' +
+                  '<p style="margin:3px 0;font-size:13px">Goal: ' + escapeHtml(user.goal) + '     <span' + planStyle + '>' + escapeHtml(user.plan) + '</span>     Joined ' + formatShortDate(user.createdAt || new Date().toISOString()) + '</p>' +
                   '<div class="button-row" style="margin-top:10px">' +
                     '<button class="btn-secondary" data-action="upgrade-user" data-user="' + user.id + '">Upgrade to Premium</button>' +
                     '<button class="btn-secondary" data-action="downgrade-user" data-user="' + user.id + '">Downgrade to Free</button>' +
@@ -929,19 +938,26 @@
             '</section>' +
             '<section class="glass panel"><h3>Recent Member Snapshot</h3>' +
               normalUsers.slice(0, 6).map(function (user) {
-                return '<div class="mini-card"><strong>' + escapeHtml(user.name) + '</strong><p>' + escapeHtml(user.email) + ' \u2022 ' + escapeHtml(user.plan) + ' \u2022 ' + escapeHtml(user.goal) + '</p></div>';
+                return '<div class="mini-card"><strong>' + escapeHtml(user.name) + '</strong><p>' + escapeHtml(user.email) + '     ' + escapeHtml(user.plan) + '     ' + escapeHtml(user.goal) + '</p></div>';
               }).join("") +
             '</section>' +
           '</div>'
         : '');
   }
+
   function renderMobileNav() {
     var items = state.admin
-      ? [["admin", "Admin"]]
-      : [["dashboard", "Home"], ["workouts", "Workout"], ["progress", "Progress"], ["nutrition", "Meals"], ["settings", "Settings"]];
+      ? [["admin", "📈 Admin"]]
+      : [
+          ["dashboard",    "🏠 Home"],
+          ["workouts",     "💪 Train"],
+          ["progress",     "📈 Charts"],
+          ["integrations", "📥 Import"],
+          ["settings",     "⚙️ More"]
+        ];
 
     return '<div class="glass mobile-nav"><div class="mobile-nav-inner ' + (state.admin ? "admin-nav" : "") + '">' + items.map(function (item) {
-      return '<button class="' + (state.page === item[0] ? "active" : "") + '" data-nav="' + item[0] + '">' + item[1] + "</button>";
+      return '<button class="' + (state.page === item[0] ? "active" : "") + '" data-nav="' + item[0] + '">' + item[1] + '</button>';
     }).join("") + "</div></div>";
   }
 
@@ -975,12 +991,20 @@
     return '<section class="glass panel chart-card"><h3>' + title + "</h3>" + content + "</section>";
   }
 
-  function renderBars(values) {
-    if (!values.length || !hasPositive(values)) return "<p>No data yet. Save workouts to build this chart.</p>";
-    var max = Math.max.apply(null, values) || 1;
-    return '<div class="chart-box">' + values.map(function (value) {
-      return '<div class="bar" style="height:' + Math.max(12, Math.round((value / max) * 220)) + 'px"></div>';
+  function renderBars(data) {
+    var vals = data.values || data;
+    if (!vals.length || !hasPositive(vals)) return "<p>No data yet. Save workouts to build this chart.</p>";
+    var max = Math.max.apply(null, vals) || 1;
+    return '<div class="chart-box" style="align-items:flex-end;gap:12px;margin-top:20px;">' + vals.map(function (value, i) {
+      var lbl = data.labels && data.labels[i] ? String(data.labels[i]).slice(5) : "";
+      var h = Math.max(12, Math.round((value / max) * 180));
+      return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;">' +
+        '<span style="font-size:10px;color:rgba(255,255,255,0.6);margin-bottom:4px;">' + Math.round(value) + '</span>' +
+        '<div class="bar" style="height:' + h + 'px;width:100%;border-radius:6px;background:linear-gradient(180deg,#8db0ff,#8a5cff 65%,#b050ff);"></div>' +
+        (lbl ? '<span style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px;white-space:nowrap;transform:rotate(-45deg);transform-origin:left center;">' + escapeHtml(lbl) + '</span>' : '') +
+        '</div>';
     }).join("") + "</div>";
+  }).join("") + "</div>";
   }
 
   function renderLineChart(data) {
@@ -996,6 +1020,8 @@
       var x = data.values.length === 1 ? width / 2 : 20 + (i * ((width - 40) / (data.values.length - 1)));
       var y = chartH - 20 - ((data.values[i] / max) * (chartH - 40));
       points.push(x + "," + y);
+      labelsSvg += '<text x="' + x + '" y="' + (y - 12) + '" fill="rgba(255,255,255,0.8)" font-size="10" text-anchor="middle">' + Math.round(data.values[i]*10)/10 + '</text>';
+      labelsSvg += '<text x="' + x + '" y="' + (y - 12) + '" fill="rgba(255,255,255,0.8)" font-size="10" text-anchor="middle">' + Math.round(data.values[i]*10)/10 + '</text>';
       
       if (data.labels && data.labels[i] && (data.labels.length <= 8 || i % Math.ceil(data.labels.length/6) === 0 || i === data.values.length - 1)) {
         var labelText = String(data.labels[i]).slice(5); // Show MM-DD roughly if YYYY-MM-DD
@@ -1047,7 +1073,7 @@
           field("Search", '<input data-input="exercise-search" value="' + escapeAttr(state.modal.query || "") + '" placeholder="Bench, squat, biceps, dumbbell...">') +
           '<div class="exercise-picker-grid">' +
             results.map(function (exercise) {
-              return '<button class="exercise-option" data-action="select-exercise" data-name="' + escapeAttr(exercise.name) + '"><strong>' + escapeHtml(exercise.name) + '</strong><span>' + escapeHtml(exercise.category) + " â€¢ " + escapeHtml(exercise.primaryMuscle) + " â€¢ " + escapeHtml(exercise.equipment) + '</span></button>';
+              return '<button class="exercise-option" data-action="select-exercise" data-name="' + escapeAttr(exercise.name) + '"><strong>' + escapeHtml(exercise.name) + '</strong><span>' + escapeHtml(exercise.category) + " &bull; " + escapeHtml(exercise.primaryMuscle) + " &bull; " + escapeHtml(exercise.equipment) + '</span></button>';
             }).join("") +
           '</div>' +
         '</div>' +
@@ -1061,7 +1087,7 @@
     return '' +
       '<div class="modal-backdrop" data-action="close-modal">' +
         '<div class="glass modal-card modal-wide" data-modal-card="true">' +
-          '<div class="page-head"><div><p class="eyebrow">Exercise Form</p><h2>' + escapeHtml(meta.name) + '</h2><p>' + escapeHtml(meta.category) + " â€¢ " + escapeHtml(meta.primaryMuscle) + " â€¢ " + escapeHtml(meta.equipment) + '</p></div><button class="btn-secondary" data-action="close-modal">Close</button></div>' +
+          '<div class="page-head"><div><p class="eyebrow">Exercise Form</p><h2>' + escapeHtml(meta.name) + '</h2><p>' + escapeHtml(meta.category) + "   " + escapeHtml(meta.primaryMuscle) + "   " + escapeHtml(meta.equipment) + '</p></div><button class="btn-secondary" data-action="close-modal">Close</button></div>' +
           (premium.allowed
             ? '<div class="cards-two"><section class="glass panel"><div class="form-demo ' + escapeAttr(meta.demoType) + '"><div class="demo-stage"><div class="demo-body"></div><div class="demo-limb limb-a"></div><div class="demo-limb limb-b"></div><div class="demo-bar"></div></div></div><p class="demo-label">Animated premium form demo</p></section><section class="glass panel"><h3>Coaching Cues</h3><div class="pill-row">' + meta.cues.map(function (cue) { return '<span>' + escapeHtml(cue) + '</span>'; }).join("") + '</div><div style="height:16px"></div><div class="mini-card"><strong>Primary focus</strong><p>' + escapeHtml(meta.primaryMuscle) + '</p></div><div class="mini-card"><strong>Equipment</strong><p>' + escapeHtml(meta.equipment) + '</p></div></section></div>'
             : '<section class="glass panel"><h3>Premium feature</h3><p>' + escapeHtml(premium.message) + '</p><div class="badge">Ask admin to upgrade this account</div></section>') +
@@ -1224,7 +1250,19 @@
     } else if (input === "exercise-search") {
       if (state.modal && state.modal.type === "exercise-picker") {
         state.modal.query = event.target.value;
-        render();
+        var grid = document.querySelector(".exercise-picker-grid");
+        if (grid) {
+          var query = state.modal.query.toLowerCase();
+          var results = EXERCISE_LIBRARY.filter(function (ex) {
+            if (!query) return true;
+            return ex.name.toLowerCase().indexOf(query) > -1 ||
+              ex.category.toLowerCase().indexOf(query) > -1 ||
+              ex.primaryMuscle.toLowerCase().indexOf(query) > -1;
+          }).slice(0, 100);
+          grid.innerHTML = results.map(function (exercise) {
+            return '<button class="exercise-option" data-action="select-exercise" data-name="' + escapeAttr(exercise.name) + '"><strong>' + escapeHtml(exercise.name) + '</strong><span>' + escapeHtml(exercise.category) + " &bull; " + escapeHtml(exercise.primaryMuscle) + " &bull; " + escapeHtml(exercise.equipment) + '</span></button>';
+          }).join("");
+        }
       }
     } else if (input === "hevy-file") {
       previewImport(event.target.files && event.target.files[0]);
@@ -2073,54 +2111,112 @@
   }
 
   function buildAnalytics() {
-    var workouts = filteredWorkouts();
-    var weekly = state.workouts.filter(function (workout) {
-      return new Date(workout.createdAt).getTime() >= Date.now() - 7 * 24 * 60 * 60 * 1000;
+    var allWorkouts = state.workouts.slice().sort(function(a, b) {
+      return new Date(a.createdAt) - new Date(b.createdAt);
     });
-    var mealEntries = state.meals.filter(function (meal) {
-      return new Date(meal.createdAt).getTime() >= Date.now() - rangeDays() * 24 * 60 * 60 * 1000;
-    }).reverse();
-    var dailyWorkoutCounts = aggregateByDay(workouts, function () { return 1; });
-    var bodyWeightEntries = state.weightLogs.slice(0, 12).reverse();
-    var bodyWeightValues = bodyWeightEntries.map(function (entry) { return Number(entry.value || 0); });
-    var bodyWeightLabels = bodyWeightEntries.map(function (entry) { return String(entry.createdAt || "").slice(0,10); });
-    if (!bodyWeightValues.length && state.healthImportDetails.length) {
-      bodyWeightValues = extractHealthWeightSeries();
-    }
+    var workouts = filteredWorkouts();
+
+    // Monthly volume and sessions from ALL workouts
+    var monthlyVol = {};
+    var monthlySess = {};
+    allWorkouts.forEach(function(w) {
+      var d = new Date(w.createdAt);
+      if (isNaN(d)) return;
+      var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2,'0');
+      monthlyVol[key] = (monthlyVol[key] || 0) + (w.volume || 0);
+      monthlySess[key] = (monthlySess[key] || 0) + 1;
+    });
+    var monthKeys = Object.keys(monthlyVol).sort();
+    var monthLabels = monthKeys.map(function(k) { return k.slice(5); }); // MM only
+    var monthVolValues = monthKeys.map(function(k) { return Math.round(monthlyVol[k]); });
+    var monthSessValues = monthKeys.map(function(k) { return monthlySess[k]; });
+
+    // Find top exercise (most sets)
+    var exerciseCounts = {};
+    allWorkouts.forEach(function(w) {
+      (w.exercises || []).forEach(function(ex) {
+        exerciseCounts[ex.name] = (exerciseCounts[ex.name] || 0) + (ex.sets ? ex.sets.length : 1);
+      });
+    });
+    var topExercise = Object.keys(exerciseCounts).sort(function(a,b){
+      return exerciseCounts[b] - exerciseCounts[a];
+    })[0] || (state.selectedExercise !== 'All' ? state.selectedExercise : 'Top Lift');
+    var targetExercise = state.selectedExercise !== 'All' ? state.selectedExercise : topExercise;
+
+    // Strength progression for target exercise - best weight per workout day
+    var strengthMap = {};
+    allWorkouts.forEach(function(w) {
+      var day = String(w.createdAt).slice(0,10);
+      (w.exercises || []).forEach(function(ex) {
+        if (ex.name === targetExercise) {
+          (ex.sets || []).forEach(function(s) {
+            var kg = parseFloat(s.weight) || 0;
+            if (kg > (strengthMap[day] || 0)) strengthMap[day] = kg;
+          });
+        }
+      });
+    });
+    var strengthDays = Object.keys(strengthMap).sort();
+    var strengthValues = strengthDays.map(function(d) { return strengthMap[d]; });
+    var strengthLabels = strengthDays.map(function(d) { return d.slice(5); });
+
+    // Consistency - workout days per week in range
+    var consistMap = {};
+    workouts.forEach(function(w) {
+      var day = String(w.createdAt).slice(0,10);
+      consistMap[day] = (consistMap[day] || 0) + 1;
+    });
+    var consistDays = Object.keys(consistMap).sort();
+
+    // Body weight
+    var bwEntries = state.weightLogs.slice().sort(function(a,b){
+      return new Date(a.createdAt) - new Date(b.createdAt);
+    });
+    var bwValues = bwEntries.map(function(e) { return Number(e.value) || 0; });
+    var bwLabels = bwEntries.map(function(e) { return String(e.createdAt).slice(0,10).slice(5); });
+
+    // Total volume all-time
+    var totalVol = allWorkouts.reduce(function(acc, w) { return acc + (w.volume || 0); }, 0);
+    var bestMonthKey = monthKeys.reduce(function(best, k) {
+      return monthlyVol[k] > (monthlyVol[best] || 0) ? k : best;
+    }, monthKeys[0] || '');
+
+    var weekly = state.workouts.filter(function(w) {
+      return new Date(w.createdAt) >= Date.now() - 7 * 86400000;
+    });
+
     return {
-      strength: chartData(
-        workouts.map(function (workout) { return maxWeight(workout); }),
-        workouts.map(function (workout) { return String(workout.createdAt).slice(0,10); })
-      ),
-      volume: chartData(workouts.map(function (workout) { return Math.round(workout.volume); })),
-      consistency: { values: dailyWorkoutCounts.values, labels: dailyWorkoutCounts.labels },
-      bodyWeight: chartData(bodyWeightValues, bodyWeightLabels),
-      heartRate: chartData(
-        workouts.map(function (workout) { return workout.health.heartRateAvg || 0; }),
-        workouts.map(function (workout) { return String(workout.createdAt).slice(0,10); })
-      ),
-      calories: chartData(mealEntries.map(function (meal) { return meal.calories || 0; })),
+      monthlyVolume: { values: monthVolValues, labels: monthLabels },
+      monthlySessions: { values: monthSessValues, labels: monthLabels },
+      strength: { values: strengthValues, labels: strengthLabels },
+      topExercise: targetExercise,
+      bodyWeight: { values: bwValues, labels: bwLabels },
+      consistency: { values: consistDays.map(function(d){ return consistMap[d]; }), labels: consistDays.map(function(d){ return d.slice(5); }) },
+      volume: { values: workouts.map(function(w){ return Math.round(w.volume||0); }), labels: workouts.map(function(w){ return String(w.createdAt).slice(5,10); }) },
+      calories: { values: [], labels: [] },
+      heartRate: { values: workouts.map(function(w){ return w.health && w.health.heartRateAvg || 0; }), labels: workouts.map(function(w){ return String(w.createdAt).slice(5,10); }) },
       prs: prList(),
       heat: muscleHeat(workouts),
       recoveryScore: computeRecoveryScore(workouts),
       restingHeartRate: computeRestingHeartRate(workouts),
-      averageVolume: workouts.length ? workouts.reduce(function (acc, workout) { return acc + workout.volume; }, 0) / workouts.length : 0,
-      goalHelper: weekly.length + " of 4 weekly workouts completed",
+      averageVolume: allWorkouts.length ? totalVol / allWorkouts.length : 0,
+      totalVolume: totalVol,
+      bestMonth: bestMonthKey ? bestMonthKey : '--',
+      goalHelper: weekly.length + ' of 4 weekly workouts completed',
       workoutCount: workouts.length,
       importedHealth: !!state.healthData.importedAt
     };
   }
 
   function filteredWorkouts() {
-    var days = state.dateRange === "7d" ? 7 : state.dateRange === "90d" ? 90 : 30;
-    var cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    var cutoff = Date.now() - rangeDays() * 24 * 60 * 60 * 1000;
     return state.workouts.filter(function (workout) {
       var inRange = new Date(workout.createdAt).getTime() >= cutoff;
       var matchExercise = state.selectedExercise === "All" || workout.exercises.some(function (exercise) {
         return exercise.name === state.selectedExercise;
       });
       return inRange && matchExercise;
-    }).slice(0, 8).reverse();
+    }).sort(function(a, b) { return new Date(a.createdAt) - new Date(b.createdAt); });
   }
 
   function chartData(values, labels) {
@@ -2219,7 +2315,10 @@
   }
 
   function rangeDays() {
-    return state.dateRange === "7d" ? 7 : state.dateRange === "90d" ? 90 : 30;
+    if (state.dateRange === "1y") return 365;
+    if (state.dateRange === "1m") return 30;
+    if (state.dateRange === "7d") return 7;
+    return 3;
   }
 
   function aggregateByDay(workouts, picker) {
@@ -2622,7 +2721,7 @@
   }
 
   function labelize(value) {
-    return String(value).replace(/([A-Z])/g, " $1").replace(/^./, function (char) { return char.toUpperCase(); });
+    return String(value).replace(/([xZ])/g, " $1").replace(/^./, function (char) { return char.toUpperCase(); });
   }
 
   function hasPositive(values) {
