@@ -28,6 +28,11 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Debug: List files
+        run: |
+          echo "Current working directory: $(pwd)"
+          ls -R
+
       - name: Upload frontend as GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
