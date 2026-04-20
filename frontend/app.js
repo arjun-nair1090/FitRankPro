@@ -1,5 +1,7 @@
 (function () {
+  console.log("FitRank Initialization Started...");
   var API = defaultApiBase();
+  console.log("API Base Resolved To: " + API);
   var STORAGE = {
     user: "fitrank-user",
     admin: "fitrank-admin",
@@ -176,7 +178,9 @@
   render();
 
   function defaultApiBase() {
-    return location.protocol === "file:" ? "http://localhost:8080/api" : location.protocol + "//" + location.hostname + ":8080/api";
+    var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    if (location.protocol === "file:") return "http://localhost:8080/api";
+    return isLocal ? "http://localhost:8080/api" : location.origin + "/api";
   }
 
   function load(key, fallback) {
