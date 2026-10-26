@@ -449,6 +449,9 @@ details[open] summary::after { rotate: 225deg; translate: 0 2px; }
 .finish h3 { font-size: 20px; }
 .finish .stat-row { width: 100%; }
 .finish .records { width: 100%; text-align: left; }
+.finish .compare { font-size: 13px; margin-top: -6px; }
+.finish .vs { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); }
+.finish .vs.up { color: var(--good); }
 .finish-ring { display: grid; place-items: center; width: 84px; height: 84px; border-radius: 50%; background: rgba(47, 210, 122, .14); color: var(--good); }
 .finish-ring .i { stroke-width: 2.2; stroke-dasharray: 24; }
 
@@ -494,6 +497,7 @@ body:has(.rest:not([hidden])) .main { padding-bottom: calc(170px + var(--safe-b)
 .sheet-backdrop.in { animation: fade .3s ease; }
 .finish-ring { animation: pop .6s var(--ease) both .1s; }
 .finish-ring .i { animation: check .5s var(--ease) both .4s; }
+.finish :is(.vs, .compare) { animation: fade .4s var(--ease) both 1s; }
 @media (min-width: 900px) { .sheet.in { animation-name: sheet-in; } }
 @keyframes rise { from { transform: translateY(6px); } }
 @keyframes draw { from { stroke-dashoffset: 100; } }

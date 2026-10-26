@@ -868,18 +868,22 @@
         <button type="button" class="btn wide" data-act="pick" data-for-routine="1">${icon("plus", 16)}Add exercises</button>
         <button class="btn primary wide" ${(s.exercises || []).length ? "" : "disabled"}>Save routine</button>
       </form>` }),
-    summary: s => ({ title: "Workout saved", html: h`<div class="finish">
+    summary: ({ workout: w, prev: p, prs }) => ({ title: "Workout saved", html: h`<div class="finish">
         <div class="finish-ring">${icon("check", 40)}</div>
-        <h3>${s.workout.title}</h3>
+        <h3>${w.title}</h3>
         <div class="stat-row center">
-          <div><span class="muted">Duration</span><b>${count(s.workout.durationMinutes)} min</b></div>
-          <div><span class="muted">Volume</span><b>${count(vol(s.workout), "vol")} ${unit()}</b></div>
-          <div><span class="muted">Sets</span><b>${count(s.workout.sets.length)}</b></div>
+          <div><span class="muted">Duration</span><b>${count(w.durationMinutes)} min</b>${p && p.durationMinutes ? delta(w.durationMinutes - p.durationMinutes, v => v + " min", false) : ""}</div>
+          <div><span class="muted">Volume</span><b>${count(vol(w), "vol")} ${unit()}</b>${p ? delta(vol(w) - vol(p), v => Math.round(toU(v)).toLocaleString() + " " + unit()) : ""}</div>
+          <div><span class="muted">Sets</span><b>${count(w.sets.length)}</b>${p ? delta(w.sets.length - p.sets.length, v => v + (v === 1 ? " set" : " sets")) : ""}</div>
         </div>
-        ${s.prs.length ? h`<ul class="records">${s.prs.map(p => h`<li>${icon("trophy", 18)}<div><b>${p.exercise}</b><span class="muted">New e1RM ${fmtW(p.e1)} ${unit()}</span></div></li>`)}</ul>` : ""}
-        <div class="row-actions center"><button class="btn" data-act="save-routine-from" data-id="${s.workout.id}">${icon("routines", 16)}Save as routine</button><button class="btn primary" data-act="close-sheet">Done</button></div>
+        ${p ? h`<p class="muted compare">Compared with your last ${p.title} · ${agoLower(ts(p))}</p>` : ""}
+        ${prs.length ? h`<ul class="records">${prs.map(p => h`<li>${icon("trophy", 18)}<div><b>${p.exercise}</b><span class="muted">New e1RM ${fmtW(p.e1)} ${unit()}</span></div></li>`)}</ul>` : ""}
+        <div class="row-actions center"><button class="btn" data-act="save-routine-from" data-id="${w.id}">${icon("routines", 16)}Save as routine</button><button class="btn primary" data-act="close-sheet">Done</button></div>
       </div>` }),
   };
+
+  /** Change against the last session; green only when more is better. */
+  const delta = (d, f, better = true) => h`<small class="vs${better && d > 0 ? " up" : ""}">${d ? (d > 0 ? "+" : "−") + f(Math.abs(d)) : "Same"}</small>`;
 
   function pickList(s) {
     const q = (s.q || "").trim().toLowerCase(), g = s.group || "All";
@@ -942,9 +946,10 @@
     const L = state.live;
     btn.disabled = true;
     try {
+      const title = L.title.trim() || defaultTitle(), prev = state.workouts.find(w => w.title.trim().toLowerCase() === title.toLowerCase());
       const prs = groupSets(sets).map(e => ({ exercise: e.name, e1: Math.max(...e.sets.map(s => e1rm(s.weight, s.reps))) })).filter(p => bestE1(p.exercise) && p.e1 > bestE1(p.exercise) + 0.01);
       const saved = await db.save("workouts", {
-        title: L.title.trim() || defaultTitle(), loggedAt: new Date(L.startedAt).toISOString(),
+        title, loggedAt: new Date(L.startedAt).toISOString(),
         durationMinutes: Math.max(1, Math.round((Date.now() - L.startedAt) / 60000)), calories: 0, notes: "",
         sets: sets.map(s => ({ ...s, rpe: 0, tag: "normal" })),
       });
@@ -952,7 +957,7 @@
       state.live = null;
       saveLive();
       rest.stop();
-      go("home", true, { type: "summary", workout: saved, prs });
+      go("home", true, { type: "summary", workout: saved, prev, prs });
     } catch (e) { btn.disabled = false; fail(e); }
   }
 
