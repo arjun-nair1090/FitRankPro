@@ -1356,6 +1356,7 @@
     s.style.setProperty("--y", p[1] + "%");
     s.querySelector(".scrub-tip").textContent = `${p[3]} · ${p[2]}${p[4] ? " · PR" : ""}`;
     s.classList.toggle("flip", p[0] > 70);
+    s.classList.toggle("below", p[1] < 25); // keep the tip inside the plot near the top edge
   }
 
   // ---------- events ----------

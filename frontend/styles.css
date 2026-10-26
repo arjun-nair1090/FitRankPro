@@ -286,10 +286,11 @@ select {
 .scrub::before { content: ""; position: absolute; left: var(--x); top: 0; bottom: 0; width: 1px; background: rgba(244, 245, 247, .35); }
 .scrub-dot { position: absolute; left: var(--x); top: var(--y); width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--text); border: 3px solid var(--accent); }
 .scrub-tip {
-  position: absolute; left: var(--x); top: -6px; translate: 10px -100%; padding: 4px 8px; border-radius: 6px;
+  position: absolute; left: var(--x); top: var(--y); translate: var(--tx, 12px) var(--ty, calc(-100% - 10px)); padding: 4px 8px; border-radius: 6px;
   background: var(--text); color: var(--ink); font-size: 12px; font-weight: 650; white-space: nowrap;
 }
-.scrub.flip .scrub-tip { translate: calc(-100% - 10px) -100%; }
+.scrub.flip .scrub-tip { --tx: calc(-100% - 12px); }
+.scrub.below .scrub-tip { --ty: 10px; }
 .hbars { list-style: none; display: grid; gap: 10px; }
 .hbars li { display: grid; grid-template-columns: minmax(80px, 34%) 1fr 40px; align-items: center; gap: 10px; font-size: 14px; }
 .hbars li > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
