@@ -1,314 +1,340 @@
 package com.fitrank.app;
 
-import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
 
+/** FitRank REST API plus the static frontend, on one port. */
 public class FitRankServer {
-    private final JdbcFitRankRepository jdbc = new JdbcFitRankRepository();
-    private final MemoryRepository fallback = new MemoryRepository();
+    private static final int MAX_BODY = 2 * 1024 * 1024;
+    private static final Map<String, Class<? extends UserEntry>> KINDS = new HashMap<String, Class<? extends UserEntry>>();
+    private static final Map<String, String> TYPES = new HashMap<String, String>();
+
+    static {
+        KINDS.put("workouts", WorkoutSession.class);
+        KINDS.put("meals", Meal.class);
+        KINDS.put("weights", WeightLog.class);
+        TYPES.put("html", "text/html; charset=utf-8");
+        TYPES.put("js", "text/javascript; charset=utf-8");
+        TYPES.put("css", "text/css; charset=utf-8");
+        TYPES.put("json", "application/json; charset=utf-8");
+        TYPES.put("webmanifest", "application/manifest+json");
+        TYPES.put("svg", "image/svg+xml");
+        TYPES.put("png", "image/png");
+    }
+
+    private final Store store;
+    private final Auth auth;
+    private final Path web;
+
+    FitRankServer(Store store, Auth auth, Path web) {
+        this.store = store;
+        this.auth = auth;
+        this.web = web;
+    }
 
     public static void main(String[] args) throws Exception {
-        int port = Integer.parseInt(System.getenv().containsKey("PORT") ? System.getenv("PORT") : "8080");
-        FitRankServer app = new FitRankServer();
+        int port = Integer.parseInt(env("PORT", "8080"));
+        FitRankServer app = new FitRankServer(openStore(), new Auth(env("FITRANK_SECRET", null)), locate("frontend"));
+        app.ensureAdmin();
+        app.start(port);
+        System.out.println("FitRank running on http://localhost:" + port + " (store: " + app.store.kind() + ")");
+        if (System.getenv("FITRANK_SECRET") == null) {
+            System.out.println("Tip: set FITRANK_SECRET so sign-ins survive a server restart.");
+        }
+    }
+
+    HttpServer start(int port) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/api", app.new ApiHandler());
-        server.setExecutor(null);
+        server.createContext("/api/", this::api);
+        server.createContext("/", this::staticFile);
+        server.setExecutor(Executors.newCachedThreadPool());
         server.start();
-        System.out.println("FitRank API running on http://localhost:" + port);
+        return server;
     }
 
-    private class ApiHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            cors(exchange);
-            if ("OPTIONS".equals(exchange.getRequestMethod())) {
-                send(exchange, 204, "");
-                return;
-            }
-            String path = exchange.getRequestURI().getPath();
-            String method = exchange.getRequestMethod();
-            try {
-                if (path.equals("/api/health")) {
-                    send(exchange, 200, "{\"status\":\"ok\",\"product\":\"FitRank\"}");
-                } else if (path.equals("/api/auth/signup") && method.equals("POST")) {
-                    signup(exchange);
-                } else if (path.equals("/api/auth/login") && method.equals("POST")) {
-                    login(exchange);
-                } else if (path.equals("/api/admin/login") && method.equals("POST")) {
-                    adminLogin(exchange);
-                } else if (path.equals("/api/auth/forgot") && method.equals("POST")) {
-                    handleForgot(exchange);
-                } else if (path.equals("/api/auth/oauth") && method.equals("POST")) {
-                    send(exchange, 200, "{\"message\":\"OAuth handoff ready for Google and Apple\",\"token\":\"demo-oauth-token\"}");
-                } else if (path.equals("/api/dashboard")) {
-                    dashboard(exchange);
-                } else if (path.equals("/api/exercises") && method.equals("GET")) {
-                    exercises(exchange);
-                } else if (path.equals("/api/exercises") && method.equals("POST")) {
-                    createExercise(exchange);
-                } else if (path.equals("/api/workouts") && method.equals("POST")) {
-                    createWorkout(exchange);
-                } else if (path.equals("/api/admin/stats")) {
-                    if (!requireAdmin(exchange)) return;
-                    adminStats(exchange);
-                } else if (path.equals("/api/admin/users")) {
-                    if (!requireAdmin(exchange)) return;
-                    users(exchange);
-                } else if (path.equals("/api/admin/users/action") && method.equals("POST")) {
-                    if (!requireAdmin(exchange)) return;
-                    adminUserAction(exchange);
-                } else if (path.equals("/api/admin/analytics")) {
-                    if (!requireAdmin(exchange)) return;
-                    analytics(exchange);
-                } else if (path.equals("/api/admin/content") && method.equals("POST")) {
-                    if (!requireAdmin(exchange)) return;
-                    adminContent(exchange);
-                } else if (path.equals("/api/integrations/hevy/import") && method.equals("POST")) {
-                    send(exchange, 200, "{\"message\":\"Hevy CSV/API import accepted\",\"status\":\"queued\"}");
-                } else if (path.equals("/api/integrations/apple-health")) {
-                    send(exchange, 200, "{\"message\":\"Apple Health requires iPhone PWA permission bridge or native wrapper\",\"status\":\"ready\"}");
-                } else if (path.equals("/api/pro/insights")) {
-                    proInsights(exchange);
-                } else {
-                    send(exchange, 404, "{\"error\":\"Route not found\"}");
-                }
-            } catch (Exception ex) {
-                send(exchange, 500, "{\"error\":\"" + JsonUtil.escape(ex.getMessage()) + "\"}");
-            }
-        }
-    }
-
-    private void signup(HttpExchange exchange) throws IOException, SQLException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        User user = new User(0, value(body, "name", "FitRank Athlete"), value(body, "email", "athlete@fitrank.app"),
-                value(body, "goal", "Strength"));
-        user.setPasswordHash(JsonUtil.hash(value(body, "password", "password")));
+    private static Store openStore() {
         try {
-            user = jdbc.createUser(user);
-        } catch (SQLException ex) {
-            fallback.create(user);
+            return new JdbcStore(env("FITRANK_DB_URL", "jdbc:postgresql://localhost:5432/fitrank"), env("FITRANK_DB_USER", "postgres"),
+                    env("FITRANK_DB_PASSWORD", ""), locate("database").resolve("schema.sql"));
+        } catch (Exception e) {
+            System.out.println("PostgreSQL unavailable (" + e.getMessage() + ").");
+            System.out.println("Using the in-memory store: data is lost when the server stops.");
+            return new MemoryStore();
         }
-        send(exchange, 201, "{\"token\":\"demo-session-" + user.getId() + "\",\"user\":" + user.toJson() + "}");
     }
 
-    private void login(HttpExchange exchange) throws IOException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        String email = value(body, "email", "athlete@fitrank.app");
-        User user = new User(1, "FitRank Athlete", email, "Strength", "PRO", 8);
-        send(exchange, 200, "{\"token\":\"demo-session-1\",\"user\":" + user.toJson() + "}");
+    /** Creates the first admin account when none exists. */
+    void ensureAdmin() throws Exception {
+        for (User u : store.users("")) if (u.canAccessAdmin()) return;
+        String password = env("FITRANK_ADMIN_PASSWORD", null);
+        boolean generated = password == null;
+        if (generated) password = Auth.randomPassword();
+        AdminUser admin = new AdminUser();
+        admin.setName("FitRank Admin");
+        admin.setEmail(env("FITRANK_ADMIN_EMAIL", "admin@fitrank.app"));
+        admin.setPasswordHash(Auth.hash(password));
+        store.saveUser(admin);
+        System.out.println("Created admin " + admin.getEmail() + (generated ? " with password " + password : ""));
     }
 
-    private void handleForgot(HttpExchange exchange) throws IOException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        String email = value(body, "email", "");
-        String token = value(body, "token", "FR-" + Long.toHexString(System.currentTimeMillis()).toUpperCase());
-        String baseUrl = value(body, "resetBaseUrl", "http://localhost:8080/");
-        String resetUrl = baseUrl + "?resetToken=" + token + "&email=" + email;
-        System.out.println("\n====== FitRank Password Reset (Simulated Email) ======");
-        System.out.println("To: " + email);
-        System.out.println("Subject: Reset your FitRank password");
-        System.out.println("Reset URL: " + resetUrl);
-        System.out.println("Token: " + token);
-        System.out.println("======================================================\n");
-        send(exchange, 200, "{\"message\":\"Password reset link generated. Check the server console for the reset URL.\",\"devResetUrl\":\"" + JsonUtil.escape(resetUrl) + "\",\"token\":\"" + JsonUtil.escape(token) + "\"}");
+    // ---- API ----
+
+    private void api(HttpExchange ex) throws IOException {
+        int status = 200;
+        Object result;
+        try {
+            result = route(ex.getRequestMethod(), ex.getRequestURI().getPath().replaceAll("/+$", ""), ex);
+        } catch (HttpError e) {
+            status = e.status;
+            result = error(e.getMessage());
+        } catch (IllegalArgumentException e) {
+            status = 400;
+            result = error(e.getMessage());
+        } catch (IllegalStateException e) {
+            status = 409;
+            result = error(e.getMessage());
+        } catch (Exception e) {
+            e.printStackTrace();
+            status = 500;
+            result = error("Something went wrong on the server");
+        }
+        ex.getResponseHeaders().set("Cache-Control", "no-store");
+        send(ex, status, "application/json; charset=utf-8", Json.write(result).getBytes(StandardCharsets.UTF_8));
     }
 
-    private void adminLogin(HttpExchange exchange) throws IOException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        String email = value(body, "email", "");
-        String password = value(body, "password", "");
-        if ("admin@fitrank.app".equalsIgnoreCase(email) && "Admin@123".equals(password)) {
-            AdminUser admin = new AdminUser(100, "FitRank Super Admin", email, "Super Admin");
-            send(exchange, 200, "{\"token\":\"admin-demo-token\",\"privileges\":[\"USER_MANAGE\",\"CONTENT_MANAGE\",\"ANALYTICS_VIEW\",\"SUBSCRIPTION_MANAGE\",\"NOTIFICATION_SEND\"],\"user\":" + admin.toJson() + "}");
+    private Object route(String method, String path, HttpExchange ex) throws Exception {
+        if (path.equals("/api/health")) return map("status", "ok", "store", store.kind());
+        if (method.equals("POST") && path.equals("/api/auth/signup")) return signup(body(ex));
+        if (method.equals("POST") && path.equals("/api/auth/login")) return login(body(ex));
+        if (method.equals("POST") && path.equals("/api/auth/forgot")) return forgot(body(ex));
+        if (method.equals("POST") && path.equals("/api/auth/reset")) return reset(body(ex));
+
+        User me = currentUser(ex);
+        if (path.equals("/api/me")) {
+            if (method.equals("GET")) {
+                return map("user", me, "workouts", store.entries(WorkoutSession.class, me.getId()),
+                        "meals", store.entries(Meal.class, me.getId()), "weights", store.entries(WeightLog.class, me.getId()));
+            }
+            if (method.equals("PUT")) {
+                me.apply(body(ex));
+                return store.saveUser(me);
+            }
+            if (method.equals("DELETE")) {
+                if (me.canAccessAdmin()) throw new HttpError(400, "Admin accounts can't be deleted");
+                store.deleteUser(me.getId());
+                return map("ok", true);
+            }
+        }
+        if (method.equals("PUT") && path.equals("/api/me/password")) {
+            Map<String, Object> b = body(ex);
+            if (!Auth.verify(Json.str(b, "current", ""), me.getPasswordHash())) throw new HttpError(400, "Current password is wrong");
+            String next = Json.str(b, "password", "");
+            Auth.checkStrength(next);
+            me.setPasswordHash(Auth.hash(next));
+            store.saveUser(me);
+            return map("ok", true);
+        }
+        if (path.startsWith("/api/admin/")) return admin(method, path, me, ex);
+
+        String[] parts = path.split("/");
+        Class<? extends UserEntry> kind = parts.length >= 3 ? KINDS.get(parts[2]) : null;
+        if (kind != null && parts.length == 3) {
+            if (method.equals("GET")) return store.entries(kind, me.getId());
+            if (method.equals("POST")) return saveEntry(kind, 0, me, body(ex));
+        }
+        if (kind != null && parts.length == 4) {
+            int id = id(parts[3]);
+            if (method.equals("PUT")) return saveEntry(kind, id, me, body(ex));
+            if (method.equals("DELETE")) {
+                if (!store.deleteEntry(kind, me.getId(), id)) throw new HttpError(404, "Not found");
+                return map("ok", true);
+            }
+        }
+        throw new HttpError(404, "No route for " + method + " " + path);
+    }
+
+    private Object signup(Map<String, Object> b) throws Exception {
+        String email = Json.str(b, "email", "").toLowerCase();
+        if (!email.matches("[^@\\s]+@[^@\\s]+\\.[^@\\s]+")) throw new IllegalArgumentException("Enter a valid email address");
+        String password = Json.str(b, "password", "");
+        Auth.checkStrength(password);
+        User u = new User();
+        u.setEmail(email);
+        u.setName(UserEntry.text(b, "name", email.split("@")[0], 120));
+        u.setGoal(UserEntry.text(b, "goal", "Strength", 80));
+        u.setPasswordHash(Auth.hash(password));
+        return session(store.saveUser(u));
+    }
+
+    private Object login(Map<String, Object> b) throws Exception {
+        User u = store.findUserByEmail(Json.str(b, "email", ""));
+        if (u == null || !Auth.verify(Json.str(b, "password", ""), u.getPasswordHash())) throw new HttpError(401, "Wrong email or password");
+        return session(u);
+    }
+
+    private Object forgot(Map<String, Object> b) throws Exception {
+        String email = Json.str(b, "email", "").toLowerCase();
+        if (store.findUserByEmail(email) != null) {
+            // FitRank has no mail service: the code goes to the server console the owner is running.
+            System.out.println("Password reset code for " + email + ": " + auth.startReset(email) + " (valid 30 minutes)");
+        }
+        return map("message", "If that account exists, a 6-digit reset code is now in the FitRank server console.");
+    }
+
+    private Object reset(Map<String, Object> b) throws Exception {
+        String email = Json.str(b, "email", "").toLowerCase();
+        String password = Json.str(b, "password", "");
+        Auth.checkStrength(password);
+        User u = store.findUserByEmail(email);
+        if (u == null || !auth.finishReset(email, Json.str(b, "code", ""))) throw new HttpError(400, "That reset code is wrong or expired. Request a new one.");
+        u.setPasswordHash(Auth.hash(password));
+        return session(store.saveUser(u));
+    }
+
+    private Object admin(String method, String path, User me, HttpExchange ex) throws Exception {
+        if (!me.canAccessAdmin()) throw new HttpError(403, "Admins only");
+        if (method.equals("GET") && path.equals("/api/admin/stats")) return store.stats();
+        if (method.equals("GET") && path.equals("/api/admin/users")) return store.users(query(ex, "q"));
+        String[] parts = path.split("/");
+        if (parts.length == 5 && parts[3].equals("users")) {
+            User target = store.findUser(id(parts[4]));
+            if (target == null) throw new HttpError(404, "User not found");
+            if (target.canAccessAdmin()) throw new HttpError(400, "Admin accounts can't be changed here");
+            if (method.equals("PUT")) {
+                target.setPlan(Json.str(body(ex), "plan", ""));
+                return store.saveUser(target);
+            }
+            if (method.equals("DELETE")) {
+                store.deleteUser(target.getId());
+                return map("ok", true);
+            }
+        }
+        throw new HttpError(404, "No route for " + method + " " + path);
+    }
+
+    private <T extends UserEntry> Object saveEntry(Class<T> kind, int id, User me, Map<String, Object> b) throws Exception {
+        T entry = kind.getDeclaredConstructor().newInstance();
+        entry.load(b);
+        entry.setId(id);
+        entry.setUserId(me.getId());
+        T saved = store.saveEntry(entry);
+        if (saved == null) throw new HttpError(404, "Not found");
+        return saved;
+    }
+
+    private Map<String, Object> session(User u) {
+        return map("token", auth.issue(u.getId()), "user", u);
+    }
+
+    private User currentUser(HttpExchange ex) throws Exception {
+        String header = ex.getRequestHeaders().getFirst("Authorization");
+        int id = auth.verifyToken(header != null && header.startsWith("Bearer ") ? header.substring(7) : null);
+        User u = id < 0 ? null : store.findUser(id);
+        if (u == null) throw new HttpError(401, "Please sign in again");
+        return u;
+    }
+
+    // ---- static frontend ----
+
+    private void staticFile(HttpExchange ex) throws IOException {
+        String path = ex.getRequestURI().getPath();
+        Path file = web.resolve(path.substring(1)).normalize();
+        if (Files.isDirectory(file)) file = file.resolve("index.html");
+        if (!file.startsWith(web) || !Files.isRegularFile(file)) {
+            send(ex, 404, "text/plain; charset=utf-8", "Not found".getBytes(StandardCharsets.UTF_8));
             return;
         }
-        send(exchange, 401, "{\"error\":\"Invalid admin credentials\"}");
+        String name = file.getFileName().toString();
+        String type = TYPES.get(name.substring(name.lastIndexOf('.') + 1));
+        ex.getResponseHeaders().set("Cache-Control", "no-cache");
+        ex.getResponseHeaders().set("Content-Security-Policy",
+                "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'");
+        send(ex, 200, type == null ? "application/octet-stream" : type, Files.readAllBytes(file));
     }
 
-    private void dashboard(HttpExchange exchange) throws IOException {
-        String json = "{\"today\":{\"title\":\"Push Power\",\"sets\":18,\"calories\":462,\"duration\":64},"
-                + "\"streak\":8,\"upcoming\":\"Pull Hypertrophy\",\"records\":[\"Bench Press 82.5kg x 8\",\"5K Run 24:10\"],"
-                + "\"recoveryScore\":82,\"music\":\"High-tempo strength mix\",\"moodMode\":\"Locked In\"}";
-        send(exchange, 200, json);
-    }
+    // ---- helpers ----
 
-    private void exercises(HttpExchange exchange) throws IOException {
-        String q = JsonUtil.parseQuery(exchange.getRequestURI().getQuery()).get("q");
-        try {
-            send(exchange, 200, listToJson(jdbc.findExercises(q)));
-        } catch (SQLException ex) {
-            send(exchange, 200, listToJson(seedExercises()));
+    private static void send(HttpExchange ex, int status, String type, byte[] bytes) throws IOException {
+        ex.getResponseHeaders().set("Content-Type", type);
+        ex.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        ex.sendResponseHeaders(status, bytes.length);
+        try (OutputStream os = ex.getResponseBody()) {
+            os.write(bytes);
         }
     }
 
-    private void createExercise(HttpExchange exchange) throws IOException, SQLException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        Exercise exercise = new Exercise(0, value(body, "name", "Custom Lift"), value(body, "category", "Custom"),
-                value(body, "primaryMuscle", "Full Body"), value(body, "equipment", "Any"), value(body, "substitute", "Machine variation"));
-        exercise.setInstructions(value(body, "instructions", "Keep movement pain-free and controlled."));
-        try {
-            exercise = jdbc.createExercise(exercise);
-        } catch (SQLException ex) {
-            fallback.create(exercise);
-        }
-        send(exchange, 201, exercise.toJson());
-    }
-
-    private void createWorkout(HttpExchange exchange) throws IOException, SQLException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        WorkoutSession session = new WorkoutSession(0, intValue(body, "userId", 1), value(body, "title", "Live Workout"));
-        session.setNotes(value(body, "notes", "Auto-saved from FitRank logger"));
-        session.setCalories(intValue(body, "calories", 380));
-        session.setDurationMinutes(intValue(body, "durationMinutes", 45));
-        session.setVisibility(value(body, "visibility", "PRIVATE"));
-        session.addSet(1, doubleValue(body, "weight", 80), intValue(body, "reps", 8));
-        session.getSets().get(0).setRpe(doubleValue(body, "rpe", 8));
-        session.getSets().get(0).setTag(value(body, "tag", "WORKING"));
-        try {
-            session = jdbc.createWorkout(session);
-        } catch (SQLException ex) {
-            fallback.create(session);
-        }
-        send(exchange, 201, session.toJson());
-    }
-
-    private void adminStats(HttpExchange exchange) throws IOException {
-        try {
-            send(exchange, 200, jdbc.dashboardStats());
-        } catch (SQLException ex) {
-            send(exchange, 200, "{\"users\":12840,\"activeToday\":3182,\"paidSubscribers\":1240,\"revenue\":48620,\"churnRate\":3.8,\"workoutsPerDay\":9021,\"retention\":71}");
-        }
-    }
-
-    private void users(HttpExchange exchange) throws IOException {
-        String q = JsonUtil.parseQuery(exchange.getRequestURI().getQuery()).get("q");
-        try {
-            send(exchange, 200, listToJsonUsers(jdbc.findUsers(q)));
-        } catch (SQLException ex) {
-            List<User> users = new ArrayList<User>();
-            users.add(new User(1, "Arjun Nair", "arjun@example.com", "Muscle gain", "PRO", 12));
-            users.add(new AdminUser(2, "FitRank Support", "support@fitrank.app", "Support Admin"));
-            send(exchange, 200, listToJsonUsers(users));
-        }
-    }
-
-    private void analytics(HttpExchange exchange) throws IOException {
-        send(exchange, 200, "{\"mostUsedExercises\":[\"Bench Press\",\"Back Squat\",\"Pull Up\"],\"topCountries\":[\"India\",\"United States\",\"United Kingdom\"],\"avgSessionDuration\":52,\"conversionFunnel\":{\"visit\":100,\"signup\":31,\"trial\":12,\"paid\":7}}");
-    }
-
-    private void adminUserAction(HttpExchange exchange) throws IOException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        String action = value(body, "action", "review");
-        String userId = value(body, "userId", "1");
-        send(exchange, 200, "{\"status\":\"complete\",\"userId\":\"" + JsonUtil.escape(userId) + "\",\"action\":\"" + JsonUtil.escape(action) + "\"}");
-    }
-
-    private void adminContent(HttpExchange exchange) throws IOException {
-        Map<String, String> body = JsonUtil.parseObject(read(exchange));
-        String type = value(body, "type", "exercise");
-        send(exchange, 200, "{\"status\":\"published\",\"type\":\"" + JsonUtil.escape(type) + "\",\"auditLog\":\"Content Admin change recorded\"}");
-    }
-
-    private void proInsights(HttpExchange exchange) throws IOException {
-        send(exchange, 200, "{\"plateau\":\"Bench press volume has stalled for 3 weeks\",\"overload\":\"Add 2.5kg or 1 rep next push day\",\"recoveryScore\":82,\"muscleBalance\":\"Posterior chain needs 14% more weekly volume\",\"deload\":\"Plan deload after 2 more hard weeks\"}");
-    }
-
-    private List<Exercise> seedExercises() {
-        List<Exercise> exercises = new ArrayList<Exercise>();
-        exercises.add(new Exercise(1, "Barbell Bench Press", "Chest", "Pectorals", "Barbell", "Dumbbell Press"));
-        exercises.add(new Exercise(2, "Pull Up", "Back", "Lats", "Bodyweight", "Lat Pulldown"));
-        exercises.add(new Exercise(3, "Back Squat", "Legs", "Quads", "Barbell", "Goblet Squat"));
-        exercises.add(new Exercise(4, "Treadmill Run", "Cardio", "Heart", "Machine", "Bike Erg"));
-        return exercises;
-    }
-
-    private String listToJson(List<Exercise> exercises) {
-        StringBuilder builder = new StringBuilder("[");
-        for (int i = 0; i < exercises.size(); i++) {
-            if (i > 0) {
-                builder.append(",");
+    private static Map<String, Object> body(HttpExchange ex) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        try (InputStream in = ex.getRequestBody()) {
+            for (int n; (n = in.read(buf)) > 0; ) {
+                out.write(buf, 0, n);
+                if (out.size() > MAX_BODY) throw new HttpError(413, "Request body is too large");
             }
-            builder.append(exercises.get(i).toJson());
         }
-        return builder.append("]").toString();
+        return Json.object(new String(out.toByteArray(), StandardCharsets.UTF_8));
     }
 
-    private String listToJsonUsers(List<User> users) {
-        StringBuilder builder = new StringBuilder("[");
-        for (int i = 0; i < users.size(); i++) {
-            if (i > 0) {
-                builder.append(",");
+    private static String query(HttpExchange ex, String key) throws IOException {
+        String raw = ex.getRequestURI().getRawQuery();
+        if (raw != null) {
+            for (String pair : raw.split("&")) {
+                String[] kv = pair.split("=", 2);
+                if (kv[0].equals(key) && kv.length == 2) return URLDecoder.decode(kv[1], "UTF-8");
             }
-            builder.append(users.get(i).toJson());
         }
-        return builder.append("]").toString();
+        return "";
     }
 
-    private void cors(HttpExchange exchange) {
-        Headers headers = exchange.getResponseHeaders();
-        headers.add("Access-Control-Allow-Origin", "*");
-        headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization");
-        headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        headers.add("Content-Type", "application/json; charset=utf-8");
-    }
-
-    private boolean requireAdmin(HttpExchange exchange) throws IOException {
-        String auth = exchange.getRequestHeaders().getFirst("Authorization");
-        if (auth != null && auth.contains("admin-demo-token")) {
-            return true;
-        }
-        send(exchange, 403, "{\"error\":\"Admin login required\",\"login\":\"admin@fitrank.app\"}");
-        return false;
-    }
-
-    private String read(HttpExchange exchange) throws IOException {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(exchange.getRequestBody(), "UTF-8"));
-        StringBuilder builder = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) {
-            builder.append(line);
-        }
-        return builder.toString();
-    }
-
-    private void send(HttpExchange exchange, int status, String body) throws IOException {
-        byte[] bytes = body.getBytes("UTF-8");
-        exchange.sendResponseHeaders(status, bytes.length);
-        OutputStream os = exchange.getResponseBody();
-        os.write(bytes);
-        os.close();
-    }
-
-    private String value(Map<String, String> map, String key, String fallbackValue) {
-        String value = map.get(key);
-        return value == null || value.trim().length() == 0 ? fallbackValue : value;
-    }
-
-    private int intValue(Map<String, String> map, String key, int fallbackValue) {
+    private static int id(String s) {
         try {
-            return Integer.parseInt(value(map, key, String.valueOf(fallbackValue)));
-        } catch (NumberFormatException ex) {
-            return fallbackValue;
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            throw new HttpError(404, "Not found");
         }
     }
 
-    private double doubleValue(Map<String, String> map, String key, double fallbackValue) {
-        try {
-            return Double.parseDouble(value(map, key, String.valueOf(fallbackValue)));
-        } catch (NumberFormatException ex) {
-            return fallbackValue;
+    private static Map<String, Object> map(Object... kv) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        for (int i = 0; i < kv.length; i += 2) m.put((String) kv[i], kv[i + 1]);
+        return m;
+    }
+
+    private static Map<String, Object> error(String message) {
+        return map("error", message);
+    }
+
+    private static Path locate(String dir) {
+        Path here = Paths.get(dir);
+        return (Files.isDirectory(here) ? here : Paths.get("..", dir)).toAbsolutePath().normalize();
+    }
+
+    private static String env(String key, String fallback) {
+        String v = System.getenv(key);
+        return v == null || v.trim().isEmpty() ? fallback : v;
+    }
+
+    private static class HttpError extends RuntimeException {
+        final int status;
+
+        HttpError(int status, String message) {
+            super(message);
+            this.status = status;
         }
     }
 }

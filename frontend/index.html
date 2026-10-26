@@ -3,16 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0f0f0f">
+  <meta name="theme-color" content="#0B0C0E">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="FitRank: a fast workout logger with progress charts, Hevy and Apple Health import.">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="FitRank">
-  <title>FitRank | Premium Fitness Tracker</title>
+  <title>FitRank</title>
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icon-180.png">
   <link rel="manifest" href="manifest.webmanifest">
-  <link rel="stylesheet" href="styles.css?v=15">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
 </head>
 <body>
-  <div id="app"></div>
-  <script src="app.js?v=15" defer></script>
+  <div id="app"><div class="boot" aria-label="Loading FitRank"></div></div>
+  <div id="rest" class="rest" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

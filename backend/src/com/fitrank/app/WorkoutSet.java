@@ -1,109 +1,60 @@
 package com.fitrank.app;
 
-public class WorkoutSet extends BaseEntity {
-    private int exerciseId;
-    private int order;
-    private double weight;
-    private int reps;
-    private int durationSeconds;
-    private double distanceKm;
-    private double rpe;
-    private String tag;
-    private String notes;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
-    public WorkoutSet() {
-        tag = "WORKING";
-    }
+/** One logged set. Sets belong to a session and have no identity of their own. */
+public class WorkoutSet {
+    private final String exercise;
+    private final double weight;
+    private final int reps;
+    private final double rpe;
+    private final String tag;
 
-    public WorkoutSet(int exerciseId, double weight, int reps) {
-        this.exerciseId = exerciseId;
+    public WorkoutSet(String exercise, double weight, int reps, double rpe, String tag) {
+        this.exercise = exercise;
         this.weight = weight;
         this.reps = reps;
-        this.tag = "WORKING";
+        this.rpe = rpe;
+        this.tag = tag;
     }
 
-    public int getExerciseId() {
-        return exerciseId;
+    public static WorkoutSet from(Map<String, Object> m) {
+        return new WorkoutSet(UserEntry.text(m, "exercise", "Exercise", 120), UserEntry.range(m, "weight", 2000),
+                (int) UserEntry.range(m, "reps", 1000), UserEntry.range(m, "rpe", 10), UserEntry.text(m, "tag", "normal", 20));
     }
 
-    public void setExerciseId(int exerciseId) {
-        this.exerciseId = exerciseId;
+    public double volume() {
+        return weight * reps;
     }
 
-    public int getOrder() {
-        return order;
-    }
-
-    public void setOrder(int order) {
-        this.order = order;
+    public String getExercise() {
+        return exercise;
     }
 
     public double getWeight() {
         return weight;
     }
 
-    public void setWeight(double weight) {
-        this.weight = weight;
-    }
-
     public int getReps() {
         return reps;
-    }
-
-    public void setReps(int reps) {
-        this.reps = reps;
-    }
-
-    public int getDurationSeconds() {
-        return durationSeconds;
-    }
-
-    public void setDurationSeconds(int durationSeconds) {
-        this.durationSeconds = durationSeconds;
-    }
-
-    public double getDistanceKm() {
-        return distanceKm;
-    }
-
-    public void setDistanceKm(double distanceKm) {
-        this.distanceKm = distanceKm;
     }
 
     public double getRpe() {
         return rpe;
     }
 
-    public void setRpe(double rpe) {
-        this.rpe = rpe;
-    }
-
     public String getTag() {
         return tag;
     }
 
-    public void setTag(String tag) {
-        this.tag = tag;
-    }
-
-    public String getNotes() {
-        return notes;
-    }
-
-    public void setNotes(String notes) {
-        this.notes = notes;
-    }
-
-    @Override
-    public String toJson() {
-        return "{\"exerciseId\":" + exerciseId
-                + ",\"order\":" + order
-                + ",\"weight\":" + weight
-                + ",\"reps\":" + reps
-                + ",\"durationSeconds\":" + durationSeconds
-                + ",\"distanceKm\":" + distanceKm
-                + ",\"rpe\":" + rpe
-                + ",\"tag\":\"" + JsonUtil.escape(tag)
-                + "\",\"notes\":\"" + JsonUtil.escape(notes) + "\"}";
+    public Map<String, Object> toMap() {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("exercise", exercise);
+        m.put("weight", weight);
+        m.put("reps", reps);
+        m.put("rpe", rpe);
+        m.put("tag", tag);
+        return m;
     }
 }

@@ -1,0 +1,380 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-25T15:49:07.444712+00:00",
+  "title": "Design System: FitRank",
+  "extensions": {
+    "colorMeta": {
+      "ground": {
+        "role": "neutral",
+        "displayName": "Gym Floor",
+        "canonical": "#0B0C0E",
+        "tonalRamp": [
+          "#22252B",
+          "#3B414B",
+          "#555D6C",
+          "#6F798D",
+          "#8F97A7",
+          "#AFB5C0",
+          "#D0D3DA",
+          "#F1F2F4"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Card Slate",
+        "canonical": "#15171B",
+        "tonalRamp": [
+          "#21252B",
+          "#3B414C",
+          "#545D6D",
+          "#6E788D",
+          "#8E97A7",
+          "#AFB5C1",
+          "#D0D3DA",
+          "#F1F2F4"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Raised Slate",
+        "canonical": "#1C1F24",
+        "tonalRamp": [
+          "#21252B",
+          "#3B414C",
+          "#545E6D",
+          "#6E7A8D",
+          "#8E98A7",
+          "#AFB6C1",
+          "#D0D4DA",
+          "#F1F2F4"
+        ]
+      },
+      "surface-control": {
+        "role": "neutral",
+        "displayName": "Control Slate",
+        "canonical": "#252930",
+        "tonalRamp": [
+          "#21252B",
+          "#3B414C",
+          "#545D6D",
+          "#6D798E",
+          "#8E97A8",
+          "#AFB5C1",
+          "#D0D4DB",
+          "#F1F2F4"
+        ]
+      },
+      "seam": {
+        "role": "neutral",
+        "displayName": "Seam",
+        "canonical": "#262A31",
+        "tonalRamp": [
+          "#21252B",
+          "#3B414C",
+          "#545D6D",
+          "#6E798E",
+          "#8E97A7",
+          "#AFB6C1",
+          "#D0D4DA",
+          "#F1F2F4"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Chalk",
+        "canonical": "#F4F5F7",
+        "tonalRamp": [
+          "#20242C",
+          "#39404E",
+          "#515B70",
+          "#6A7792",
+          "#8B96AB",
+          "#ADB4C3",
+          "#CED3DC",
+          "#F0F2F4"
+        ]
+      },
+      "ink-muted": {
+        "role": "neutral",
+        "displayName": "Muted Chalk",
+        "canonical": "#9AA1AC",
+        "tonalRamp": [
+          "#23252A",
+          "#3D424A",
+          "#575E6A",
+          "#717B8A",
+          "#9199A5",
+          "#B1B6BF",
+          "#D1D4D9",
+          "#F1F2F3"
+        ]
+      },
+      "signal-blue": {
+        "role": "primary",
+        "displayName": "Signal Blue",
+        "canonical": "#3D7BFF",
+        "tonalRamp": [
+          "#00184C",
+          "#002B87",
+          "#003EC1",
+          "#0050FB",
+          "#3777FF",
+          "#719EFF",
+          "#ABC6FF",
+          "#E6EEFF"
+        ]
+      },
+      "signal-blue-fill": {
+        "role": "primary",
+        "displayName": "Signal Blue Fill",
+        "canonical": "#2F6BF0",
+        "tonalRamp": [
+          "#051A47",
+          "#092D7E",
+          "#0D41B4",
+          "#1155EA",
+          "#447AF2",
+          "#7AA1F5",
+          "#B1C7F9",
+          "#E7EEFD"
+        ]
+      },
+      "done-green": {
+        "role": "tertiary",
+        "displayName": "Done Green",
+        "canonical": "#2FD27A",
+        "tonalRamp": [
+          "#0E3F24",
+          "#186F40",
+          "#229F5C",
+          "#2DCF77",
+          "#5ADB96",
+          "#8AE6B4",
+          "#BAF0D3",
+          "#EAFAF2"
+        ]
+      },
+      "record-amber": {
+        "role": "tertiary",
+        "displayName": "Record Amber",
+        "canonical": "#F5B53D",
+        "tonalRamp": [
+          "#493104",
+          "#805607",
+          "#B87B09",
+          "#EFA00C",
+          "#F5B640",
+          "#F8CB78",
+          "#FBE1AF",
+          "#FEF6E7"
+        ]
+      },
+      "stop-red": {
+        "role": "tertiary",
+        "displayName": "Stop Red",
+        "canonical": "#F2555A",
+        "tonalRamp": [
+          "#470508",
+          "#7D0A0D",
+          "#B30E13",
+          "#EA1219",
+          "#F1454A",
+          "#F57B7F",
+          "#F9B1B3",
+          "#FDE7E8"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Sign-in headline only."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Page titles and the greeting."
+      },
+      "figure": {
+        "displayName": "Figure",
+        "purpose": "Dial values and big stats; units at 0.42em in muted chalk."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Card headings, exercise and workout names."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "All running text, tabular numerals."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Field labels, axis ticks, logger column heads (uppercase there)."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 10px 30px rgba(0,0,0,.5)",
+        "purpose": "Rest-timer dock and toasts."
+      },
+      {
+        "name": "sheet",
+        "value": "0 -12px 40px rgba(0,0,0,.5)",
+        "purpose": "Bottom sheets on phone."
+      },
+      {
+        "name": "auth-card",
+        "value": "0 24px 60px rgba(0,0,0,.5)",
+        "purpose": "Sign-in card over the animated background."
+      },
+      {
+        "name": "segment-lift",
+        "value": "0 1px 2px rgba(0,0,0,.4)",
+        "purpose": "Selected segment in a segmented control."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Every entrance, draw and state transition."
+      },
+      {
+        "name": "route-entrance",
+        "value": "cards translateY(6px) .5s with 40ms stagger; dial draw 1.5s; bar grow .9s with 22ms stagger; line clip reveal 1.4s; count-up 1.1s",
+        "purpose": "Once per route change, never on re-render."
+      },
+      {
+        "name": "set-complete",
+        "value": "row tint sweep .55s; tick draw .4s; PR badge .6s plus a 10-particle burst .7s",
+        "purpose": "Logger feedback when a set is ticked."
+      },
+      {
+        "name": "view-transition",
+        "value": "old .18s fade; new .32s fade with 8px rise",
+        "purpose": "Route cross-fade through the View Transitions API."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "all durations 1ms",
+        "purpose": "prefers-reduced-motion: reduce."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone-narrow",
+        "value": "420px"
+      },
+      {
+        "name": "phone",
+        "value": "599px"
+      },
+      {
+        "name": "sidebar",
+        "value": "900px"
+      },
+      {
+        "name": "two-up",
+        "value": "1000px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one main action per view.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.75\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg>Start workout</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:10px;background:#2F6BF0;color:#fff;font:600 14px -apple-system,'Segoe UI',Roboto,sans-serif;cursor:pointer;transition:background .2s,transform .15s cubic-bezier(.16,1,.3,1)}.ds-btn-primary:hover{background:#3A75F5}.ds-btn-primary:active{transform:scale(.97)}.ds-btn-primary:focus-visible{outline:2px solid #3D7BFF;outline-offset:2px}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Neutral actions.",
+      "html": "<button class=\"ds-btn-secondary\">Export CSV</button>",
+      "css": ".ds-btn-secondary{height:40px;padding:0 16px;border:0;border-radius:10px;background:#252930;color:#F4F5F7;font:600 14px -apple-system,'Segoe UI',Roboto,sans-serif;cursor:pointer;transition:background .2s}.ds-btn-secondary:hover{background:#2E333B}.ds-btn-secondary:focus-visible{outline:2px solid #3D7BFF;outline-offset:2px}"
+    },
+    {
+      "name": "Armed Delete",
+      "kind": "button",
+      "refersTo": "button-danger-armed",
+      "description": "Destructive action after the first tap; the second tap confirms.",
+      "html": "<button class=\"ds-btn-danger\">Tap again to confirm</button>",
+      "css": ".ds-btn-danger{height:40px;padding:0 16px;border:0;border-radius:10px;background:#F2555A;color:#0B0C0E;font:600 14px -apple-system,'Segoe UI',Roboto,sans-serif;cursor:pointer}.ds-btn-danger:focus-visible{outline:2px solid #3D7BFF;outline-offset:2px}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled text input.",
+      "html": "<label class=\"ds-field\"><span>Weight (kg)</span><input placeholder=\"80.6\"></label>",
+      "css": ".ds-field{display:grid;gap:6px;font:15px -apple-system,'Segoe UI',Roboto,sans-serif}.ds-field span{font-size:13px;color:#9AA1AC;font-weight:500}.ds-field input{min-height:42px;padding:9px 12px;border-radius:10px;background:#1C1F24;border:1px solid #262A31;color:#F4F5F7;outline:0;font:inherit}.ds-field input:focus{border-color:#3D7BFF;background:#1F2329}.ds-field input::placeholder{color:#8A919C}"
+    },
+    {
+      "name": "Data-mode Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Always-visible storage mode.",
+      "html": "<span class=\"ds-chip\">Server</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:99px;background:rgba(47,210,122,.1);color:#6EE7A8;font:600 12px -apple-system,'Segoe UI',Roboto,sans-serif}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The unit of content.",
+      "html": "<section class=\"ds-card\"><h2>Last workout</h2><p>Pull day · Yesterday</p></section>",
+      "css": ".ds-card{background:#15171B;border:1px solid #262A31;border-radius:14px;padding:18px;color:#F4F5F7;font:15px/1.45 -apple-system,'Segoe UI',Roboto,sans-serif}.ds-card h2{font-size:16px;font-weight:650;margin:0 0 8px}.ds-card p{margin:0;color:#9AA1AC}"
+    },
+    {
+      "name": "Dial",
+      "kind": "custom",
+      "description": "Ring gauge against a real baseline; draws in on route entry.",
+      "html": "<div class=\"ds-dial\"><svg viewBox=\"0 0 120 120\"><circle cx=\"60\" cy=\"60\" r=\"52\" pathLength=\"100\" class=\"t\"/><circle cx=\"60\" cy=\"60\" r=\"52\" pathLength=\"100\" class=\"v\"/></svg><b>2<small>/4</small></b></div>",
+      "css": ".ds-dial{position:relative;width:132px;height:132px;display:grid;place-items:center;color:#F4F5F7;font:750 32px -apple-system,'Segoe UI',Roboto,sans-serif;font-variant-numeric:tabular-nums}.ds-dial svg{position:absolute;inset:0;transform:rotate(-90deg)}.ds-dial circle{fill:none;stroke-width:9}.ds-dial .t{stroke:#252930}.ds-dial .v{stroke:#2FD27A;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:50;animation:ds-draw 1.5s cubic-bezier(.16,1,.3,1) both}.ds-dial small{font-size:.42em;color:#9AA1AC}@keyframes ds-draw{from{stroke-dashoffset:100}}"
+    },
+    {
+      "name": "Set Row",
+      "kind": "custom",
+      "refersTo": "set-row",
+      "description": "Logger row; completing it sweeps green.",
+      "html": "<div class=\"ds-set\"><span>1</span><span class=\"p\">77 × 8</span><input value=\"80\"><input value=\"8\"><button aria-pressed=\"true\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M5 12.5l4.5 4.5L19 7.5\"/></svg></button></div>",
+      "css": ".ds-set{display:grid;grid-template-columns:30px 1fr 72px 60px 40px;gap:8px;align-items:center;min-height:44px;padding:0 4px;border-radius:8px;background:rgba(47,210,122,.13);color:#F4F5F7;font:15px -apple-system,'Segoe UI',Roboto,sans-serif}.ds-set span:first-child{color:#2FD27A;font-weight:650;text-align:center}.ds-set .p{color:#9AA1AC}.ds-set input{min-height:36px;text-align:center;font-weight:650;font-size:16px;background:transparent;border:0;color:inherit}.ds-set button{display:grid;place-items:center;width:36px;height:34px;border:0;border-radius:8px;background:#2FD27A;color:#0B0C0E}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lit Scoreboard",
+    "overview": "FitRank is a training log you read in a dim gym between sets, one-handed, then study at a desk later. The ground is near-black, every unit of content sits on a slightly lifted card with a hairline seam, and a single blue carries every action and every line of data. Nothing glows, nothing is glass; the drama comes from numbers.",
+    "keyCharacteristics": [
+      "Near-black ground, flat cards separated by 1px seams rather than shadows.",
+      "One accent (signal blue) for actions, active navigation and every chart line.",
+      "State colors only for state: done green, record amber, stop red.",
+      "Platform UI type with tabular numerals; figures are the loudest thing on screen.",
+      "Motion that draws data in once per route, never on re-render."
+    ],
+    "rules": [
+      {
+        "name": "The One Signal Rule",
+        "body": "Signal blue is the only hue that means act or data. New series are drawn as lighter or dimmer blue.",
+        "section": "colors"
+      },
+      {
+        "name": "The State-Only Rule",
+        "body": "Green, amber and red appear only when something is done, a record, a warning or destructive.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Every number on screen uses tabular numerals.",
+        "section": "typography"
+      },
+      {
+        "name": "The Seam Not Shadow Rule",
+        "body": "Cards are separated by a 1px seam and a tonal step, never by a shadow.",
+        "section": "elevation"
+      }
+    ]
+  }
+}

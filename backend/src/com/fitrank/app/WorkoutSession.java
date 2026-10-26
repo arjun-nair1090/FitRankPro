@@ -1,113 +1,71 @@
 package com.fitrank.app;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-public class WorkoutSession extends BaseEntity {
-    private int userId;
+public class WorkoutSession extends UserEntry {
     private String title;
     private String notes;
-    private int calories;
     private int durationMinutes;
-    private String visibility;
-    private List<WorkoutSet> sets;
+    private int calories;
+    private final List<WorkoutSet> sets = new ArrayList<WorkoutSet>();
 
-    public WorkoutSession() {
-        this.sets = new ArrayList<WorkoutSet>();
-        this.visibility = "PRIVATE";
+    @Override
+    public List<String> fields() {
+        return Arrays.asList("title", "notes", "durationMinutes", "calories");
     }
 
-    public WorkoutSession(int id, int userId, String title) {
-        super(id);
-        this.userId = userId;
-        this.title = title;
-        this.sets = new ArrayList<WorkoutSet>();
-        this.visibility = "PRIVATE";
+    @Override
+    protected void read(Map<String, Object> m) {
+        title = text(m, "title", "Workout", 160);
+        notes = text(m, "notes", "", 4000);
+        durationMinutes = (int) range(m, "durationMinutes", 1440);
+        calories = (int) range(m, "calories", 20000);
+        if (m.containsKey("sets")) {
+            List<Object> raw = Json.list(m, "sets");
+            if (raw.size() > 500) throw new IllegalArgumentException("A workout can hold at most 500 sets");
+            sets.clear();
+            for (Object o : raw) {
+                if (!(o instanceof Map)) throw new IllegalArgumentException("Each set must be an object");
+                @SuppressWarnings("unchecked")
+                Map<String, Object> set = (Map<String, Object>) o;
+                addSet(WorkoutSet.from(set));
+            }
+        }
+    }
+
+    @Override
+    protected Map<String, Object> values() {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("title", title);
+        m.put("notes", notes);
+        m.put("durationMinutes", durationMinutes);
+        m.put("calories", calories);
+        List<Object> list = new ArrayList<Object>();
+        for (WorkoutSet s : sets) list.add(s.toMap());
+        m.put("sets", list);
+        m.put("volume", volume());
+        return m;
     }
 
     public void addSet(WorkoutSet set) {
-        set.setOrder(sets.size() + 1);
         sets.add(set);
     }
 
-    public void addSet(int exerciseId, double weight, int reps) {
-        addSet(new WorkoutSet(exerciseId, weight, reps));
+    public void addSet(String exercise, double weight, int reps) {
+        addSet(new WorkoutSet(exercise, weight, reps, 0, "normal"));
     }
 
-    public int getUserId() {
-        return userId;
-    }
-
-    public void setUserId(int userId) {
-        this.userId = userId;
-    }
-
-    public String getTitle() {
-        return title;
-    }
-
-    public void setTitle(String title) {
-        this.title = title;
-    }
-
-    public String getNotes() {
-        return notes;
-    }
-
-    public void setNotes(String notes) {
-        this.notes = notes;
-    }
-
-    public int getCalories() {
-        return calories;
-    }
-
-    public void setCalories(int calories) {
-        this.calories = calories;
-    }
-
-    public int getDurationMinutes() {
-        return durationMinutes;
-    }
-
-    public void setDurationMinutes(int durationMinutes) {
-        this.durationMinutes = durationMinutes;
-    }
-
-    public String getVisibility() {
-        return visibility;
-    }
-
-    public void setVisibility(String visibility) {
-        this.visibility = visibility;
+    public double volume() {
+        double total = 0;
+        for (WorkoutSet s : sets) total += s.volume();
+        return total;
     }
 
     public List<WorkoutSet> getSets() {
         return sets;
-    }
-
-    public void setSets(List<WorkoutSet> sets) {
-        this.sets = sets;
-    }
-
-    @Override
-    public String toJson() {
-        StringBuilder builder = new StringBuilder();
-        builder.append("{\"id\":").append(getId())
-                .append(",\"userId\":").append(userId)
-                .append(",\"title\":\"").append(JsonUtil.escape(title))
-                .append("\",\"notes\":\"").append(JsonUtil.escape(notes))
-                .append("\",\"calories\":").append(calories)
-                .append(",\"durationMinutes\":").append(durationMinutes)
-                .append(",\"visibility\":\"").append(JsonUtil.escape(visibility))
-                .append("\",\"sets\":[");
-        for (int i = 0; i < sets.size(); i++) {
-            if (i > 0) {
-                builder.append(",");
-            }
-            builder.append(sets.get(i).toJson());
-        }
-        builder.append("]}");
-        return builder.toString();
     }
 }
