@@ -268,11 +268,11 @@
     ? h`<button class="btn danger" data-act="${act}" data-key="${key}" ${new Raw(extra)}>${icon("trash", 16)}Tap again to confirm</button>`
     : h`<button class="btn danger-quiet" data-act="arm" data-key="${key}">${icon("trash", 16)}${label}</button>`;
 
-  /** Ring gauge. pct 0-100 (values above 100 draw a full ring). */
+  /** Ring gauge. pct 0-100; anything above 100 draws a brighter second lap over the full ring. */
   function dial(label, pct, value, sub, tone = "accent") {
-    const off = 100 - clamp(pct, 0, 100);
+    const off = 100 - clamp(pct, 0, 100), over = clamp(pct - 100, 0, 100);
     return h`<div class="dial tone-${tone}${pct > 0 ? "" : " zero"}">
-      <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="52" pathLength="100"/><circle class="val" cx="60" cy="60" r="52" pathLength="100" style="--off:${off}"/></svg>
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="52" pathLength="100"/><circle class="val" cx="60" cy="60" r="52" pathLength="100" style="--off:${off}"/>${over ? h`<circle class="lap" cx="60" cy="60" r="52" pathLength="100" style="--off:${100 - over}"/>` : ""}</svg>
       <div class="dial-text"><b>${value}</b><span>${label}</span></div>
       <p class="dial-sub">${sub}</p>
     </div>`;

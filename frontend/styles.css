@@ -219,6 +219,7 @@ select {
 .dial .track { stroke: var(--s3); }
 .dial .val { stroke: var(--tone); stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: var(--off); }
 .dial.zero .val { opacity: 0; }
+.dial .lap { stroke: var(--tone); stroke-linecap: round; stroke-dasharray: 100; stroke-dashoffset: var(--off); filter: brightness(1.45) drop-shadow(0 0 2px rgba(0, 0, 0, .9)); }
 .tone-accent { --tone: var(--accent); }
 .tone-good { --tone: var(--good); }
 .tone-warm { --tone: var(--warn); }
@@ -476,6 +477,7 @@ body:has(.rest:not([hidden])) .main { padding-bottom: calc(170px + var(--safe-b)
 /* ---------- motion: one orchestrated entrance per route ---------- */
 .main.enter :is(.hello, .page-head, .page-title, .card, .month-title, .main > .btn) { animation: rise .5s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); }
 .main.enter .dial .val { animation: draw 1.5s var(--ease) both .2s; }
+.main.enter .dial .lap { animation: draw 1s var(--ease) both 1.2s; }
 .main.enter .bar { animation: grow .9s var(--ease) both; animation-delay: calc(250ms + var(--i) * 22ms); }
 .main.enter .plot svg { animation: reveal 1.4s var(--ease) both .25s; }
 .main.enter .end-dot { animation: pop .5s var(--ease) both 1.1s; }
