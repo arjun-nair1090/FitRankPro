@@ -1,5 +1,5 @@
 // Offline shell: network first, cached copy when offline. The API is never cached.
-const CACHE = "fitrank-v5";
+const CACHE = "fitrank-v6";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "seed.json", "manifest.webmanifest", "assets/icon.svg"];
 
 self.addEventListener("install", e => {
