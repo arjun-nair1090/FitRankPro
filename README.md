@@ -1,177 +1,125 @@
-# FitRank: Premium Fitness Management System
-**Software Engineering Project Report**
+# FitRank
 
-## 1. Problem Statement
-Fitness enthusiasts often struggle to track their progress, recovery, and nutrition across multiple isolated platforms. Existing solutions are either too complex for quick logging or lack the analytical depth required for serious strength athletes. 
+A personal workout tracker: log sets fast, import your Hevy and Apple Health history, and see real progress in charts.
 
-**FitRank** is a centralized fitness management system designed to apply rigorous software engineering practices to the domain of athletic performance. It provides a modular, maintainable, and persistent application for logging workouts, analyzing progress through data-driven charts, and managing exercise libraries using a relational database.
+- **Java API + PostgreSQL** when you run the server (accounts, data saved in the database).
+- **Browser-only demo** on GitHub Pages, where no server is reachable. The app says which mode it is in, in the corner chip.
 
-## 2. Functional Requirements
+| Home (desktop) | Progress (desktop) |
+| --- | --- |
+| ![Home dashboard](docs/screenshots/home-desktop.png) | ![Progress charts](docs/screenshots/progress-desktop.png) |
 
-### 1. User Management
-- **User Authentication**: Secure login and signup system for athletes and administrators.
-- **Profile Management**: Users can update their fitness goals (Strength, Muscle Gain, etc.) and personal details.
-- **Role-Based Access**: Administrators have higher-level access to system-wide analytics and user management.
+| Home (iPhone) | Live logger (iPhone) |
+| --- | --- |
+| <img src="docs/screenshots/home-mobile.png" width="300" alt="Home on iPhone"> | <img src="docs/screenshots/logger-mobile.png" width="300" alt="Workout logger on iPhone"> |
 
-### 2. Database Operations (CRUD)
-- **Workout Sessions**: Create, read, update, and delete workout logs.
-- **Exercise Library**: Manage a catalog of exercises with categories, equipment, and instructions.
-- **Nutrition & Weight**: Persistent storage for daily calorie intake and body weight measurements.
-- **Data Persistence**: All records are stored in a relational PostgreSQL database using JDBC.
+Screenshots are headless-Chrome captures of the running app with the bundled sample data.
 
-### 3. Additional Features (Bonus Credit)
-- **Login Authentication System**: Secure session-based access.
-- **Role-Based Access Control (RBAC)**: Distinct permissions for `AdminUser` and standard `User`.
-- **Search & Filter**: Searchable exercise library and dynamic date-range filters for analytics.
-- **Report Generation**: Real-time chart rendering for Volume, Calories, and PRs.
+## Features
 
----
+- **Home**: weekly load against your 4-week average, sessions against your weekly target, today's calories, last workout, weekly volume, recent personal records.
+- **Live logger**: previous values from your own history, done-tick per set, PR detection by estimated 1RM, rest timer, reorder, replace or remove exercises. The draft survives a reload.
+- **Routines**: build from 90+ exercises, or save any finished workout as a routine.
+- **History**: grouped by month, expand all sets, repeat, rename, delete.
+- **Progress**: estimated 1RM per lift (Epley), weekly volume, body weight, sets per muscle group, personal-record table. Ranges of 4 weeks, 12 weeks, 1 year or all.
+- **Nutrition**: calories, protein and water against your own targets, 7-day chart.
+- **Import**: Hevy workout CSV (or FitRank JSON), and Apple Health `export.xml`, which is streamed in the browser so large files work. You see a preview before anything is saved, and records already present are skipped.
+- **Insights** (Premium): strength board, consistency pace, rule-based coaching notes from your logged sets, form cues in the logger.
+- **Account**: profile, units (kg/lb), rest timer, targets, password change, JSON/CSV export, account deletion.
+- **Admin**: totals, user search, plan changes, user deletion. Premium is assigned here; there is no payment flow.
 
-## 3. Object-Oriented Design (OOP)
-FitRank demonstrates advanced OOP principles through a modular Java architecture.
+## Run it
 
-### OOP Implementation Checklist
-- [x] **Classes and Objects**: Entities like `WorkoutSession`, `Exercise`, and `User` encapsulate real-world concepts.
-- [x] **Encapsulation**: Used in all entity classes with `private` fields and `public` getters/setters.
-- [x] **Inheritance**: 
-    - `BaseEntity` (root) &rarr; `Person` &rarr; `User` &rarr; `AdminUser`.
-- [x] **Polymorphism**: 
-    - **Overriding**: `toJson()` is overridden in all entity classes to provide specific JSON serialization.
-    - **Overloading**: `WorkoutSession` handles `addSet()` with different parameter signatures.
-- [x] **Abstraction**: 
-    - `BaseEntity` and `Person` are `abstract` classes.
-    - `CrudRepository<T>` is a generic `interface` defining standard data operations.
-- [x] **Collections**: Use of `ArrayList` in `WorkoutSession` (for sets) and `MemoryRepository` (for record tracking).
+Requirements: JDK 8 or newer. PostgreSQL is optional.
 
-### Class Diagram
-```mermaid
-classDiagram
-    class BaseEntity {
-        <<abstract>>
-        -int id
-        +getId() int
-        +setId(int id)
-        +toJson()* String
-    }
-    class Person {
-        <<abstract>>
-        -String name
-        -String email
-        +getName() String
-        +getEmail() String
-    }
-    class User {
-        -String goal
-        -String plan
-        -int streakDays
-        +getGoal() String
-    }
-    class AdminUser {
-        -String adminRole
-        +canAccessAdmin() boolean
-    }
-    class Exercise {
-        -String name
-        -String category
-        -String primaryMuscle
-    }
-    class WorkoutSession {
-        -int userId
-        -String title
-        -List sets
-        +addSet(WorkoutSet set)
-    }
-
-    BaseEntity <|-- Person
-    BaseEntity <|-- Exercise
-    BaseEntity <|-- WorkoutSession
-    Person <|-- User
-    User <|-- AdminUser
-    WorkoutSession "1" *-- "*" WorkoutSet : contains
-```
-
----
-
-## 4. System Architecture
-FitRank follows a **Layered Architecture** to ensure separation of concerns and maintainability.
-
-1. **Presentation Layer**: 
-    - Interactive SPA (Single Page Application) built with Vanilla JavaScript, HTML5, and CSS3.
-    - Features Glassmorphism design and responsive charts.
-2. **Business Logic Layer**: 
-    - Java logic implemented in the `backend` package. Handles workout calculations (volume, 1RM) and user authentication.
-3. **Data Access Layer (DAO)**: 
-    - `JdbcFitRankRepository` implements the `CrudRepository` interface to interact with the database via JDBC.
-4. **Database Layer**: 
-    - PostgreSQL Relational Database storing users, workouts, exercises, and sets.
-
----
-
-## 5. Database Requirements
-
-### Database Schema (SQL)
-```sql
-CREATE TABLE users (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(120) NOT NULL,
-  email VARCHAR(180) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  goal VARCHAR(80) DEFAULT 'Strength',
-  role VARCHAR(40) DEFAULT 'USER'
-);
-
-CREATE TABLE exercises (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(160) NOT NULL,
-  category VARCHAR(80) NOT NULL,
-  primary_muscle VARCHAR(80) NOT NULL
-);
-
-CREATE TABLE workout_sessions (
-  id SERIAL PRIMARY KEY,
-  user_id INTEGER REFERENCES users(id),
-  title VARCHAR(160) NOT NULL,
-  volume NUMERIC(8,2) DEFAULT 0
-);
-```
-
-### Sample Data
-- **User**: `Arjun Nair (arjun@example.com)`
-- **Exercises**: `Barbell Bench Press`, `Back Squat`, `Pull Up`.
-- **History**: Imported dataset contains 67 workouts and 4.9M total steps from Apple Health.
-
----
-
-## 6. Application Output (Screenshots)
-
-````carousel
-![Login Screen](C:\Users\arjun\.gemini\antigravity\brain\c39c361e-215d-4ae1-b9bf-5008a6fb7cf9\login_screen_1776669266678.png)
-<!-- slide -->
-![Athlete Dashboard](C:\Users\arjun\.gemini\antigravity\brain\c39c361e-215d-4ae1-b9bf-5008a6fb7cf9\athlete_dashboard_1776669297629.png)
-<!-- slide -->
-![Progress Charts](C:\Users\arjun\.gemini\antigravity\brain\c39c361e-215d-4ae1-b9bf-5008a6fb7cf9\athlete_progress_charts_1776669358410.png)
-<!-- slide -->
-![Analytics Insight](C:\Users\arjun\.gemini\antigravity\brain\c39c361e-215d-4ae1-b9bf-5008a6fb7cf9\athlete_analytics_charts_1776669522646.png)
-````
-
----
-
-## 7. How to Run
-
-### 1. Database Setup
-1. Run `database/schema.sql` in your PostgreSQL instance.
-2. Ensure the JDBC driver is available.
-
-### 2. Start API (Backend)
 ```powershell
-cd fitrank-pro/backend
-javac -d out src/com/fitrank/app/*.java
-java -cp out com.fitrank.app.FitRankServer
+./start-fitrank.ps1
 ```
 
-### 3. Start PWA (Frontend)
+The script downloads the PostgreSQL JDBC driver on first run, compiles the backend, starts the server on http://localhost:8080 and opens it. The server also serves the web app, so there is nothing else to start.
+
+Manual equivalent:
+
 ```powershell
-cd fitrank-pro
-python serve.py 5173
+cd backend
+javac --release 8 -d out src/com/fitrank/app/*.java
+java -cp "out;lib/postgresql.jar" com.fitrank.app.FitRankServer   # use ':' instead of ';' on macOS/Linux
 ```
-Open `http://localhost:5173` in your browser.
+
+On first start the server creates an admin account. Set `FITRANK_ADMIN_PASSWORD` to choose its password; otherwise a random one is printed to the console once.
+
+### Configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `8080` | HTTP port |
+| `FITRANK_DB_URL` | `jdbc:postgresql://localhost:5432/fitrank` | Database. If it can't be reached, the server runs in memory and warns that data is lost on restart |
+| `FITRANK_DB_USER` | `postgres` | Database user |
+| `FITRANK_DB_PASSWORD` | empty | Database password |
+| `FITRANK_SECRET` | random per start | Signs login tokens. Set it so sign-ins survive a restart |
+| `FITRANK_ADMIN_EMAIL` | `admin@fitrank.app` | Admin account created on first start |
+| `FITRANK_ADMIN_PASSWORD` | random, printed | Its password |
+
+The server creates the tables itself from `database/schema.sql`. To try it with Docker:
+
+```powershell
+docker run -d --name fitrank-db -e POSTGRES_PASSWORD=fitrank -e POSTGRES_DB=fitrank -p 5432:5432 postgres:16-alpine
+$env:FITRANK_DB_PASSWORD = "fitrank"; ./start-fitrank.ps1
+```
+
+**Forgot password**: there is no email service, so the 6-digit reset code is printed in the server console. It's valid for 30 minutes and is burned after a wrong guess.
+
+**iPhone**: open `http://<your-computer-ip>:8080` on the same Wi-Fi and use Share › Add to Home Screen.
+
+### Test
+
+```powershell
+cd backend
+javac --release 8 -d out src/com/fitrank/app/*.java
+javac --release 8 -cp out -d test-out test/com/fitrank/app/ApiCheck.java
+java -cp "out;test-out" com.fitrank.app.ApiCheck
+```
+
+`ApiCheck` starts the server on a random port and exercises sign-up, login, ownership checks, admin guards, workout CRUD, settings, password change and reset, and static-file path traversal. Set `FITRANK_DB_URL` (and add `lib/postgresql.jar` to the classpath) to run it against PostgreSQL instead of memory.
+
+## How it's built
+
+```
+frontend/           Single-page app: index.html, styles.css, app.js (no build step), seed.json for the demo
+backend/src/        Java API and static file server (JDK only, plus the JDBC driver)
+backend/test/       End-to-end API check
+database/schema.sql PostgreSQL schema, applied on startup
+```
+
+### Backend design
+
+- **Inheritance**: `BaseEntity` → `Person` → `User` → `AdminUser`, and `BaseEntity` → `UserEntry` → `WorkoutSession`, `Meal`, `WeightLog`.
+- **Abstraction**: `BaseEntity`, `Person` and `UserEntry` are abstract. `UserEntry` declares `fields()`, `read()` and `values()`, so one generic SQL path stores every entry type.
+- **Polymorphism**: each entity overrides `toMap()` for its JSON shape. `AdminUser` overrides `canAccessAdmin()` and `isPremium()`. `WorkoutSession.addSet` is overloaded (`addSet(WorkoutSet)` and `addSet(String, double, int)`).
+- **Interface with two implementations**: `Store` is implemented by `JdbcStore` (PostgreSQL) and `MemoryStore` (fallback). The server picks one at startup.
+- **Generics**: `Store.entries(Class<T>, userId)` and `saveEntry(T)` with `T extends UserEntry`.
+- **Collections**: sets in a `List<WorkoutSet>`, in-memory tables in `Map`s.
+- **Security**: PBKDF2-SHA256 password hashes (120k iterations), HMAC-signed tokens valid for 30 days, owner checks on every entry, admin-only routes, 2 MB body limit, path-traversal guard and a Content-Security-Policy on static files.
+
+### API
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| GET | `/api/health` | `{status, store}`, used by the app to pick server or demo mode |
+| POST | `/api/auth/signup`, `/login`, `/forgot`, `/reset` | Return `{token, user}` (forgot returns a message) |
+| GET / PUT / DELETE | `/api/me` | Profile with all entries / update name, goal, settings / delete account |
+| PUT | `/api/me/password` | `{current, password}` |
+| GET / POST | `/api/workouts`, `/api/meals`, `/api/weights` | List / create |
+| PUT / DELETE | `/api/{kind}/{id}` | Owner only |
+| GET | `/api/admin/stats`, `/api/admin/users?q=` | Admin only |
+| PUT / DELETE | `/api/admin/users/{id}` | Change plan `{plan: FREE or PREMIUM}` / delete user |
+
+All requests except auth and health need `Authorization: Bearer <token>`.
+
+### Frontend design
+
+Dark, card-based logger in the style of Hevy, with Whoop-style data motion: dials and charts draw in, figures count up, charts have a pointer scrubber, a completed set sweeps green and a new PR pops a badge. Motion is reduced to instant changes when the system asks for reduced motion. Design tokens and rules are in [DESIGN.md](DESIGN.md).
+
+## Deploying the demo
+
+`.github/workflows/pages.yml` publishes `frontend/` to GitHub Pages on every push to `main`. With no API there, the app opens as a demo seeded with 8 weeks of anonymized sample training. Everything added is saved only in that browser.

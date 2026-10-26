@@ -1,34 +1,19 @@
-# FitRank Java API
+# FitRank backend
 
-FitRank's MVP backend is a Java 8 REST API with JDBC-ready PostgreSQL access and in-memory fallback data so the app can run immediately while a database is being configured.
-
-## Run
+Java 8+ HTTP server (JDK `com.sun.net.httpserver`) that serves the REST API under `/api` and the web app from `../frontend`. The only dependency is the PostgreSQL JDBC driver, which `../start-fitrank.ps1` downloads into `lib/`.
 
 ```powershell
-cd backend
-javac -d out src\com\fitrank\app\*.java
-java -cp out com.fitrank.app.FitRankServer
+javac --release 8 -d out src/com/fitrank/app/*.java
+java -cp "out;lib/postgresql.jar" com.fitrank.app.FitRankServer
 ```
 
-## PostgreSQL
+| File | Role |
+| --- | --- |
+| `FitRankServer` | Routing, auth guard, JSON responses, static files, store selection, admin bootstrap |
+| `Auth` | PBKDF2 password hashing, signed tokens, password-reset codes |
+| `Json` | Minimal JSON parser and writer |
+| `Store` | Persistence interface, implemented by `JdbcStore` (PostgreSQL) and `MemoryStore` (fallback) |
+| `BaseEntity`, `Person`, `User`, `AdminUser` | Account model |
+| `UserEntry`, `WorkoutSession`, `WorkoutSet`, `Meal`, `WeightLog` | Per-user records |
 
-1. Create a PostgreSQL database named `fitrank`.
-2. Run `database/schema.sql`.
-3. Put the PostgreSQL JDBC driver in `backend/lib`.
-4. Run with:
-
-```powershell
-$env:FITRANK_DB_URL="jdbc:postgresql://localhost:5432/fitrank"
-$env:FITRANK_DB_USER="postgres"
-$env:FITRANK_DB_PASSWORD="postgres"
-java -cp "out;lib\postgresql.jar" com.fitrank.app.FitRankServer
-```
-
-Endpoints include auth, separate admin login, protected admin stats/users/actions/content, workout logging, exercises, pro insights, Apple Health readiness, and Hevy import queueing.
-
-Demo admin login:
-
-```text
-admin@fitrank.app
-Admin@123
-```
+Environment variables, the API table and the test command are in the [main README](../README.md).

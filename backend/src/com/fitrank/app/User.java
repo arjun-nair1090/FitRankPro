@@ -1,31 +1,38 @@
 package com.fitrank.app;
 
+import java.util.Map;
+
 public class User extends Person {
     private String passwordHash;
-    private String goal;
-    private String role;
-    private String plan;
-    private String status;
-    private int streakDays;
+    private String goal = "Strength";
+    private String plan = "FREE";
+    private String settings = "{}";
+    private String createdAt;
 
-    public User() {
-        setRole("USER");
-        setPlan("FREE");
-        setStatus("ACTIVE");
+    /** Builds the right subclass for a stored role. */
+    public static User forRole(String role) {
+        return "ADMIN".equals(role) ? new AdminUser() : new User();
     }
 
-    public User(int id, String name, String email, String goal) {
-        super(id, name, email);
-        this.goal = goal;
-        this.role = "USER";
-        this.plan = "FREE";
-        this.status = "ACTIVE";
+    public String getRole() {
+        return "USER";
     }
 
-    public User(int id, String name, String email, String goal, String plan, int streakDays) {
-        this(id, name, email, goal);
-        this.plan = plan;
-        this.streakDays = streakDays;
+    public boolean isPremium() {
+        return !"FREE".equals(plan);
+    }
+
+    /** Applies the editable profile fields from a request body. */
+    public void apply(Map<String, Object> body) {
+        setName(UserEntry.text(body, "name", getName(), 120));
+        goal = UserEntry.text(body, "goal", goal, 80);
+        if (body.containsKey("settings")) {
+            Object s = body.get("settings");
+            if (!(s instanceof Map)) throw new IllegalArgumentException("'settings' must be an object");
+            String json = Json.write(s);
+            if (json.length() > 200000) throw new IllegalArgumentException("Settings are too large");
+            settings = json;
+        }
     }
 
     public String getPasswordHash() {
@@ -44,47 +51,41 @@ public class User extends Person {
         this.goal = goal;
     }
 
-    public String getRole() {
-        return role;
-    }
-
-    public void setRole(String role) {
-        this.role = role;
-    }
-
     public String getPlan() {
         return plan;
     }
 
     public void setPlan(String plan) {
+        if (!"FREE".equals(plan) && !"PREMIUM".equals(plan)) throw new IllegalArgumentException("Plan must be FREE or PREMIUM");
         this.plan = plan;
     }
 
-    public String getStatus() {
-        return status;
+    public String getSettings() {
+        return settings;
     }
 
-    public void setStatus(String status) {
-        this.status = status;
+    public void setSettings(String settings) {
+        this.settings = settings == null || settings.isEmpty() ? "{}" : settings;
     }
 
-    public int getStreakDays() {
-        return streakDays;
+    public String getCreatedAt() {
+        return createdAt;
     }
 
-    public void setStreakDays(int streakDays) {
-        this.streakDays = streakDays;
+    public void setCreatedAt(String createdAt) {
+        this.createdAt = createdAt;
     }
 
     @Override
-    public String toJson() {
-        return "{\"id\":" + getId()
-                + ",\"name\":\"" + JsonUtil.escape(getName())
-                + "\",\"email\":\"" + JsonUtil.escape(getEmail())
-                + "\",\"goal\":\"" + JsonUtil.escape(goal)
-                + "\",\"role\":\"" + JsonUtil.escape(role)
-                + "\",\"plan\":\"" + JsonUtil.escape(plan)
-                + "\",\"status\":\"" + JsonUtil.escape(status)
-                + "\",\"streakDays\":" + streakDays + "}";
+    public Map<String, Object> toMap() {
+        Map<String, Object> m = idMap();
+        m.put("name", getName());
+        m.put("email", getEmail());
+        m.put("goal", goal);
+        m.put("role", getRole());
+        m.put("plan", plan);
+        m.put("createdAt", createdAt);
+        m.put("settings", Json.parse(settings));
+        return m;
     }
 }

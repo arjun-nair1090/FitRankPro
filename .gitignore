@@ -1,13 +1,18 @@
-# FitRank Git Ignore
-
-# Java compiled classes
+# Build output
 backend/out/
+backend/test-out/
 *.class
 
-# Temporary and system files
+# PostgreSQL JDBC driver: start-fitrank.ps1 downloads it
+backend/lib/
+
+# System files
 .DS_Store
 Thumbs.db
 *.tmp
-
-# User data and logs (optional, but keep it clean)
 *.log
+
+# Impeccable working files
+.impeccable/questions/
+.impeccable/mocks/
+.impeccable/review/

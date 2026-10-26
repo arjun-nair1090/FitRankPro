@@ -1,2782 +1,1438 @@
-(function () {
-  console.log("FitRank Initialization Started...");
-  var API = defaultApiBase();
-  console.log("API Base Resolved To: " + API);
-  var STORAGE = {
-    user: "fitrank-user",
-    admin: "fitrank-admin",
-    users: "fitrank-users",
-    passwords: "fitrank-passwords",
-    workouts: "fitrank-workouts",
-    weight: "fitrank-weight",
-    meals: "fitrank-meals",
-    health: "fitrank-health",
-    routines: "fitrank-routines",
-    integrations: "fitrank-integrations",
-    prefs: "fitrank-prefs",
-    profile: "fitrank-profile"
+(() => {
+  "use strict";
+
+  // ---------- helpers ----------
+  const $ = (s, root = document) => root.querySelector(s);
+  const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  class Raw { constructor(s) { this.s = s; } }
+  const out = v => v instanceof Raw ? v.s : Array.isArray(v) ? v.map(out).join("") : v == null || v === false ? "" : String(v).replace(/[&<>"']/g, c => ESC[c]);
+  /** Tagged template: every interpolation is HTML-escaped unless it is itself an h`` result. */
+  const h = (strs, ...vals) => new Raw(strs.reduce((acc, s, i) => acc + s + (i < vals.length ? out(vals[i]) : ""), ""));
+  const calm = matchMedia("(prefers-reduced-motion: reduce)");
+  const DAY = 864e5, WEEK = 7 * DAY;
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+  const sum = (list, f = x => x) => list.reduce((t, x) => t + (+f(x) || 0), 0);
+  const by = f => (a, b) => f(b) - f(a);
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+    set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
   };
+  const K = { token: "fitrank-token", demo: "fitrank-demo", live: "fitrank-live" };
 
-  var MEMBER_PAGES = ["dashboard", "workouts", "routines", "progress", "analytics", "nutrition", "integrations", "profile", "settings", "pro"];
-  var ADMIN_PAGES = ["admin"];
-  var PREMIUM_PAGES = ["analytics"];
-  var PREMIUM_EXPORT_ACTIONS = ["export-data"];
-  var EXERCISE_LIBRARY = buildExerciseLibrary();
+  // numbers, units, dates
+  const settings = () => (state.user && state.user.settings) || {};
+  const unit = () => settings().units === "lb" ? "lb" : "kg";
+  const toU = kg => unit() === "lb" ? kg * 2.20462 : kg;
+  const fromU = v => unit() === "lb" ? v / 2.20462 : v;
+  const n1 = v => (Math.round(v * 10) / 10).toLocaleString();
+  const fmtW = kg => n1(toU(kg));
+  const fmtVol = kg => { const v = toU(kg); return v >= 1e4 ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "k" : Math.round(v).toLocaleString(); };
+  const ts = x => Date.parse(x.loggedAt);
+  const dayKey = t => new Date(t).toLocaleDateString("en-CA");
+  const weekStart = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (d.getDay() + 6) % 7); return +d; };
+  const fmtDate = (t, o = { weekday: "short", month: "short", day: "numeric" }) => new Date(t).toLocaleDateString(undefined, o);
+  const fmtTime = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const midnight = t => new Date(t).setHours(0, 0, 0, 0);
+  const agoLower = t => ago(t).replace(/^(Today|Yesterday)$/, m => m.toLowerCase());
+  const ago = t => { const d = Math.round((midnight(Date.now()) - midnight(t)) / DAY); return d <= 0 ? "Today" : d === 1 ? "Yesterday" : d < 7 ? d + " days ago" : fmtDate(t, { month: "short", day: "numeric" }); };
+  const clock = s => { s = Math.max(0, Math.floor(s)); const m = Math.floor(s / 60), r = String(s % 60).padStart(2, "0"); return m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${r}` : `${m}:${r}`; };
 
-  var state = {
-    authMode: "login",
-    showPassword: false,
-    rememberMe: true,
-    authError: "",
-    authInfo: "",
-    toast: "",
-    page: location.hash.replace("#", "") || "login",
-    search: "",
-    user: load(STORAGE.user, null),
-    admin: load(STORAGE.admin, null),
-    users: load(STORAGE.users, []),
-    passwords: load(STORAGE.passwords, {
-      "athlete@fitrank.app": "password"
-    }),
-    workouts: [],
-    weightLogs: [],
-    meals: [],
-    healthData: {
-      source: "",
-      steps: 0,
-      activeCalories: 0,
-      heartRate: 0,
-      recovery: 0,
-      importedAt: null
-    },
-    routines: [],
-    integrations: {},
-    preferences: {},
-    profile: {},
-    pendingMeal: { name: "", calories: "", protein: "", water: "" },
-    pendingWeight: "",
-    pendingReset: { email: "", password: "", confirm: "", token: "" },
-    selectedExercise: "All",
-    dateRange: "30d",
-    importPreview: [],
-    liveWorkout: loadLiveWorkout(),
-    healthImportDetails: [],
-    modal: null
-  };
-
-  loadUserData(state.user ? state.user.id : null);
-
-  function loadUserData(userId) {
-    if (!userId) {
-      state.workouts = [];
-      state.weightLogs = [];
-      state.meals = [];
-      state.healthData = { source: "", steps: 0, activeCalories: 0, heartRate: 0, recovery: 0, importedAt: null };
-      state.routines = [
-        { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
-        { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
-        { id: uid(), name: "Legs", days: "Wed", focus: "Quads, Glutes, Hamstrings" },
-        { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
-        { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
-      ];
-      state.integrations = {
-        appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-        appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-        hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
-      };
-      state.preferences = { units: "kg", distance: "km", restTimer: 90, autoComplete: false, smartSuggestions: true, compactMode: false, accent: "blue-purple", syncFrequency: "Hourly" };
-      state.profile = { fullName: "Athlete", bio: "Training for strength and longevity.", avatar: "FR", joinDate: new Date().toISOString() };
-      state.healthImportDetails = [];
-      return;
-    }
-
-    // Load ONLY from user-namespaced keys - never fall back to shared keys (prevents cross-user data leaks)
-    var defaultHealth = { source: "", steps: 0, activeCalories: 0, heartRate: 0, recovery: 0, importedAt: null };
-    var defaultRoutines = [
-      { id: uid(), name: "Push Day", days: "Mon / Thu", focus: "Chest, Shoulders, Triceps" },
-      { id: uid(), name: "Pull Day", days: "Tue / Fri", focus: "Back, Rear Delts, Biceps" },
-      { id: uid(), name: "Legs", days: "Wed", focus: "Quads, Glutes, Hamstrings" },
-      { id: uid(), name: "Upper Lower", days: "Sat", focus: "Balanced hypertrophy" },
-      { id: uid(), name: "Full Body", days: "Sun", focus: "General fitness" }
-    ];
-    var defaultIntegrations = {
-      appleHealth: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-      appleWatch: { connected: false, autoSync: false, lastSync: null, method: "file_import" },
-      hevyImport: { connected: false, autoSync: true, lastSync: null, method: "file_import" }
-    };
-    var defaultPrefs = { units: "kg", distance: "km", restTimer: 90, autoComplete: false, smartSuggestions: true, compactMode: false, accent: "blue-purple", syncFrequency: "Hourly" };
-
-    state.workouts = load(STORAGE.workouts + "-" + userId, []);
-    state.weightLogs = load(STORAGE.weight + "-" + userId, []);
-    state.meals = load(STORAGE.meals + "-" + userId, []);
-    state.healthData = load(STORAGE.health + "-" + userId, defaultHealth);
-    state.routines = load(STORAGE.routines + "-" + userId, defaultRoutines);
-    state.integrations = load(STORAGE.integrations + "-" + userId, defaultIntegrations);
-    state.preferences = load(STORAGE.prefs + "-" + userId, defaultPrefs);
-    
-    var defaultProfile = { fullName: state.user.name, bio: "Training for strength and longevity.", avatar: "FR", joinDate: new Date().toISOString() };
-    state.profile = load(STORAGE.profile + "-" + userId, load(STORAGE.profile, defaultProfile));
-    
-    state.healthImportDetails = load("fitrank-health-import-details-" + userId, load("fitrank-health-import-details", []));
-
-    if (state.workouts.length === 0 && state.weightLogs.length === 0) {
-      if (state.user && state.user.email === "admin@fitrank.app") {
-        loadSeedIfNeeded(userId);
-      }
-    }
-  }
-
-  function loadSeedIfNeeded(userId) {
-    if (localStorage.getItem("seed-loaded-v4-" + userId)) return;
-    fetch("seed.json").then(function(res) {
-      if (!res.ok) throw new Error();
-      return res.json();
-    }).then(function(data) {
-      state.workouts = data.workouts || [];
-      state.healthData = data.healthData || state.healthData;
-      state.weightLogs = data.weightLogs || [];
-      state.integrations = data.integrations || state.integrations;
-      localStorage.setItem("seed-loaded-v4-" + userId, "true");
-      persistAll();
-      render();
-    }).catch(function() {
-      localStorage.setItem("seed-loaded-v4-" + userId, "true");
-    });
-  }
-
-  if (!state.users.length) {
-    state.users = [
-      { id: 1, name: "Arjun Nair", email: "athlete@fitrank.app", goal: "Strength", plan: "FREE", role: "USER", createdAt: "2026-04-01T09:00:00.000Z" },
-      { id: 999, name: "FitRank Admin", email: "admin@fitrank.app", goal: "Administration", plan: "ADMIN", role: "ADMIN", createdAt: "2026-04-01T09:00:00.000Z" }
-    ];
-  }
-
-  hydrateResetContextFromUrl();
-
-  window.addEventListener("hashchange", function () {
-    state.page = location.hash.replace("#", "") || (state.user ? (state.admin ? "admin" : "dashboard") : "login");
-    if (state.page === "signup" || state.page === "login") {
-      state.authMode = state.page;
-    }
-    render();
+  // training maths
+  const vol = w => w.volume != null ? w.volume : sum(w.sets, s => s.weight * s.reps);
+  const e1rm = (w, r) => !(w > 0 && r > 0) || r > 12 ? 0 : r === 1 ? w : w * (1 + r / 30); // Epley, trusted up to 12 reps
+  const inRange = (list, from, to = Infinity) => list.filter(x => ts(x) >= from && ts(x) < to);
+  const thisWeek = () => weekStart(Date.now());
+  const weekly = (n, f = vol) => Array.from({ length: n }, (_, i) => {
+    const start = thisWeek() - (n - 1 - i) * WEEK;
+    return { label: fmtDate(start, { month: "short", day: "numeric" }), value: sum(inRange(state.workouts, start, start + WEEK), f) };
   });
+  const premium = () => !!state.user && (state.user.plan === "PREMIUM" || state.user.role === "ADMIN");
 
-  setInterval(function () {
-    if (state.user && state.page === "workouts") {
-      var timerNode = document.getElementById("workout-timer-display");
-      if (timerNode) {
-        timerNode.innerText = workoutTimer();
-      }
-    }
-  }, 1000);
+  // ---------- icons (24px grid, 1.75 stroke) ----------
+  const ICONS = {
+    home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+    log: "M6.5 6v12M3.5 9v6M17.5 6v12M20.5 9v6M6.5 12h11",
+    history: "M12 7v5l3 2M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5M3.5 4v4.5H8",
+    progress: "M4 20h16M5 15l4.5-4.5 3.5 3.5L20 7M15 7h5v5",
+    routines: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
+    food: "M7 3v8m-2.5-8v5a2.5 2.5 0 0 0 5 0V3M7 11v10M17 21V3c-2.2 1.2-3.5 3.8-3.5 7 0 2 1.5 3 3.5 3",
+    import: "M12 3v12m-4.5-4.5L12 15l4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2",
+    insights: "M12 3.5l2.5 5.3 5.8.7-4.3 4 1.1 5.7L12 16.4l-5.1 2.8L8 13.5l-4.3-4 5.8-.7z",
+    account: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 21a7.5 7.5 0 0 1 15 0",
+    admin: "M12 3l7.5 3v5.5c0 4.6-3.2 8.4-7.5 9.5-4.3-1.1-7.5-4.9-7.5-9.5V6zM9 12l2 2 4-4",
+    more: "M5 12h.01M12 12h.01M19 12h.01",
+    plus: "M12 5v14M5 12h14",
+    check: "M5 12.5l4.5 4.5L19 7.5",
+    x: "M6 6l12 12M18 6 6 18",
+    trash: "M4 7h16M10 11v6M14 11v6M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13M9 7V4h6v3",
+    up: "M6 15l6-6 6 6",
+    down: "M6 9l6 6 6-6",
+    timer: "M12 9v4.5l2.5 1.5M9.5 2.5h5M12 21.5a8 8 0 1 0 0-16 8 8 0 0 0 0 16z",
+    logout: "M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H3",
+    search: "M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4",
+    repeat: "M17 2.5l3.5 3.5L17 9.5M3.5 11V9.5A3.5 3.5 0 0 1 7 6h13.5M7 21.5L3.5 18 7 14.5M20.5 13v1.5A3.5 3.5 0 0 1 17 18H3.5",
+    edit: "M4 20h4L19.5 8.5l-4-4L4 16zM13.5 6.5l4 4",
+    download: "M12 3v12m-4.5-4.5L12 15l4.5-4.5M5 21h14",
+    trophy: "M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M12 13v4M8 21h8M10 17h4",
+    flame: "M12 3c.8 3.5 5 5.2 5 10a5 5 0 0 1-10 0c0-2 .8-3.3 2-4.3.2 1.8 1 3 2.2 3.3C11 9.5 10.7 6.2 12 3z",
+    lock: "M6 11h12v10H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
+    play: "M7.5 4.5v15l12-7.5z",
+    heart: "M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.2a4.3 4.3 0 0 1 7.5 2.6C19.5 15.4 12 20 12 20z",
+    activity: "M3 12h4l3-8 4 16 3-8h4",
+    scale: "M5 4h14a1 1 0 0 1 1 1l-1.5 14a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2L4 5a1 1 0 0 1 1-1zM9.5 9.5 12 12",
+    menu: "M12 5h.01M12 12h.01M12 19h.01",
+    server: "M4 5h16v6H4zM4 13h16v6H4zM8 8h.01M8 16h.01",
+    browser: "M3 5h18v14H3zM3 9h18",
+  };
+  const icon = (name, size = 20) => h`<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[name]}"/></svg>`;
 
-  document.addEventListener("click", handleClick);
-  document.addEventListener("submit", handleSubmit);
-  document.addEventListener("input", handleInput);
-  document.addEventListener("change", handleChange);
+  // ---------- exercise library: name|group|equipment|pattern ----------
+  const LIB = `Barbell Bench Press|Chest|Barbell|press;Incline Barbell Bench Press|Chest|Barbell|press;Decline Bench Press|Chest|Barbell|press;Dumbbell Bench Press|Chest|Dumbbell|press;Incline Dumbbell Press|Chest|Dumbbell|press;Cable Fly|Chest|Cable|fly;Pec Deck|Chest|Machine|fly;Push Up|Chest|Bodyweight|press;Dip|Chest|Bodyweight|press;Machine Chest Press|Chest|Machine|press;Smith Machine Incline Press|Chest|Machine|press;Pull Up|Back|Bodyweight|pull;Chin Up|Back|Bodyweight|pull;Assisted Pull Up|Back|Machine|pull;Lat Pulldown|Back|Cable|pull;Seated Cable Row|Back|Cable|row;Chest Supported Row|Back|Machine|row;Barbell Row|Back|Barbell|row;Pendlay Row|Back|Barbell|row;Single Arm Dumbbell Row|Back|Dumbbell|row;T Bar Row|Back|Machine|row;Machine Row|Back|Machine|row;Face Pull|Back|Cable|row;Straight Arm Pulldown|Back|Cable|pull;Back Extension|Back|Bodyweight|hinge;Back Squat|Legs|Barbell|squat;Front Squat|Legs|Barbell|squat;Goblet Squat|Legs|Dumbbell|squat;Hack Squat|Legs|Machine|squat;Leg Press|Legs|Machine|squat;Smith Machine Squat|Legs|Machine|squat;Walking Lunge|Legs|Dumbbell|lunge;Bulgarian Split Squat|Legs|Dumbbell|lunge;Step Up|Legs|Dumbbell|lunge;Romanian Deadlift|Legs|Barbell|hinge;Conventional Deadlift|Legs|Barbell|hinge;Sumo Deadlift|Legs|Barbell|hinge;Hip Thrust|Legs|Barbell|hinge;Glute Bridge|Legs|Bodyweight|hinge;Good Morning|Legs|Barbell|hinge;Hamstring Curl|Legs|Machine|curl;Nordic Curl|Legs|Bodyweight|curl;Leg Extension|Legs|Machine|extension;Adductor Machine|Legs|Machine|extension;Abductor Machine|Legs|Machine|extension;Standing Calf Raise|Legs|Machine|calf;Seated Calf Raise|Legs|Machine|calf;Overhead Press|Shoulders|Barbell|press;Seated Dumbbell Press|Shoulders|Dumbbell|press;Arnold Press|Shoulders|Dumbbell|press;Landmine Press|Shoulders|Barbell|press;Push Press|Shoulders|Barbell|press;Lateral Raise|Shoulders|Dumbbell|raise;Cable Lateral Raise|Shoulders|Cable|raise;Front Raise|Shoulders|Dumbbell|raise;Rear Delt Fly|Shoulders|Dumbbell|raise;Upright Row|Shoulders|Barbell|row;Shrug|Shoulders|Dumbbell|carry;Barbell Curl|Arms|Barbell|curl;EZ Bar Curl|Arms|Barbell|curl;Dumbbell Curl|Arms|Dumbbell|curl;Hammer Curl|Arms|Dumbbell|curl;Preacher Curl|Arms|Machine|curl;Cable Curl|Arms|Cable|curl;Triceps Pushdown|Arms|Cable|triceps;Overhead Triceps Extension|Arms|Cable|triceps;Skull Crusher|Arms|Barbell|triceps;Close Grip Bench Press|Arms|Barbell|press;Wrist Curl|Arms|Dumbbell|curl;Plank|Core|Bodyweight|core;Side Plank|Core|Bodyweight|core;Hanging Leg Raise|Core|Bodyweight|core;Cable Crunch|Core|Cable|core;Ab Wheel Rollout|Core|Bodyweight|core;Dead Bug|Core|Bodyweight|core;Pallof Press|Core|Cable|core;Russian Twist|Core|Bodyweight|core;Farmer Carry|Full Body|Dumbbell|carry;Sled Push|Full Body|Sled|carry;Kettlebell Swing|Full Body|Kettlebell|hinge;Thruster|Full Body|Barbell|press;Power Clean|Full Body|Barbell|hinge;Clean and Jerk|Full Body|Barbell|hinge;Snatch|Full Body|Barbell|hinge;Box Jump|Full Body|Plyo Box|jump;Burpee|Full Body|Bodyweight|cardio;Treadmill Run|Cardio|Machine|cardio;Bike Erg|Cardio|Machine|cardio;Rowing Machine|Cardio|Machine|cardio;Elliptical|Cardio|Machine|cardio;Jump Rope|Cardio|Rope|cardio`
+    .split(";").map(r => { const [name, group, equipment, pattern] = r.split("|"); return { name, group, equipment, pattern }; });
+  const GROUPS = ["Chest", "Back", "Legs", "Shoulders", "Arms", "Core", "Full Body", "Cardio"];
+  const CUES = {
+    press: ["Brace before you unrack", "Control the lowering", "Finish with wrists stacked over elbows"],
+    fly: ["Keep a soft bend in the elbows", "Open only as far as you control", "Squeeze to close"],
+    row: ["Lead with the elbows", "Keep the ribcage down", "Pause at the contraction"],
+    pull: ["Start by pulling the shoulders down", "Drive elbows to your sides", "Lower all the way under control"],
+    squat: ["Brace and breathe before each rep", "Knees track over toes", "Drive up through mid-foot"],
+    lunge: ["Stay tall", "Push through the front foot", "Keep the back knee soft"],
+    hinge: ["Push the hips back", "Keep a neutral spine", "Finish with glutes, not the lower back"],
+    curl: ["Keep upper arms still", "Use the full range", "Lower slower than you lift"],
+    triceps: ["Pin the elbows", "Lock out smoothly", "No torso swing"],
+    raise: ["Lead with the elbows", "Stop at shoulder height", "No momentum"],
+    extension: ["Move in both directions with control", "Pause at the end range", "Don't snap the joint"],
+    calf: ["Full stretch at the bottom", "Pause at the top", "Stay balanced"],
+    core: ["Exhale through the effort", "Ribs down, brace", "Keep tension the whole set"],
+    cardio: ["Smooth rhythm", "Stay tall", "Breathe steadily"],
+    carry: ["Stand tall", "Shoulders packed", "Short, quick steps"],
+    jump: ["Load the hips", "Land softly", "Reset between reps"],
+  };
+  // Hevy names carry the equipment in brackets ("Lateral Raise (Dumbbell)"); match on the base name.
+  const baseName = name => String(name).replace(/\s*\([^)]*\)\s*$/, "").toLowerCase();
+  const lib = name => LIB.find(e => e.name.toLowerCase() === baseName(name));
+  const groupOf = name => {
+    const e = lib(name); if (e) return e.group;
+    const n = baseName(name);
+    return /\b(plank|crunch|abs?\b|core|twist|sit up|knee raise|leg raise)/.test(n) ? "Core"
+      : /\b(squat|leg|lunge|deadlift|calf|hip|glute|hamstring|quad|adduct|abduct)/.test(n) ? "Legs"
+      : /\b(run|bike|cycl|walk|cardio|elliptical|jump rope|treadmill|stair|rowing machine|erg\b)/.test(n) ? "Cardio"
+      : /\b(delts?\b|lateral|shoulder|overhead press|military|arnold|upright row|front raise)/.test(n) ? "Shoulders"
+      : /\b(curl|triceps?\b|biceps?\b|skull|hammer|forearm|wrist|pushdown)/.test(n) ? "Arms"
+      : /\b(row|pull|lats?\b|chin|face pull|back|shrug)/.test(n) ? "Back"
+      : /\b(bench|chest|fly|flye|dip|push up|pec|butterfly)/.test(n) ? "Chest"
+      : /\b(press|raise)/.test(n) ? "Shoulders"
+      : "Full Body";
+  };
 
-  render();
+  // ---------- data: Java API or browser-only demo ----------
+  const token = () => store.get(K.token, null);
+  async function http(method, path, body) {
+    const t = token();
+    const res = await fetch("api" + path, {
+      method,
+      headers: Object.assign({ "Content-Type": "application/json" }, t ? { Authorization: "Bearer " + t } : {}),
+      body: body == null ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && t) { store.set(K.token, null); state.user = null; render(); }
+    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+    return data;
+  }
+  const server = {
+    me: () => http("GET", "/me"),
+    login: b => http("POST", "/auth/login", b),
+    signup: b => http("POST", "/auth/signup", b),
+    forgot: b => http("POST", "/auth/forgot", b),
+    reset: b => http("POST", "/auth/reset", b),
+    saveMe: b => http("PUT", "/me", b),
+    password: b => http("PUT", "/me/password", b),
+    deleteMe: () => http("DELETE", "/me"),
+    save: (kind, x) => x.id ? http("PUT", `/${kind}/${x.id}`, x) : http("POST", `/${kind}`, x),
+    remove: (kind, id) => http("DELETE", `/${kind}/${id}`),
+    admin: {
+      stats: () => http("GET", "/admin/stats"),
+      users: q => http("GET", "/admin/users?q=" + encodeURIComponent(q || "")),
+      plan: (id, plan) => http("PUT", `/admin/users/${id}`, { plan }),
+      remove: id => http("DELETE", `/admin/users/${id}`),
+    },
+  };
+  const demo = {
+    read: () => store.get(K.demo, null),
+    write(d) { store.set(K.demo, d); return d; },
+    async me() { const d = this.read(); if (!d) throw new Error("Demo not started"); return d; },
+    async start() {
+      const seed = await fetch("seed.json").then(r => r.json()).catch(() => ({ workouts: [] }));
+      const latest = Math.max(0, ...seed.workouts.map(ts));
+      const shift = latest ? Date.now() - DAY - latest : 0; // the sample's last session lands yesterday
+      let seq = 0;
+      const workouts = seed.workouts.map(w => ({ ...w, id: ++seq, loggedAt: new Date(ts(w) + shift).toISOString(), volume: vol(w) }));
+      return this.write({ seq, user: { id: 1, name: "Demo Athlete", email: "demo@fitrank.local", goal: "Strength", role: "USER", plan: "PREMIUM", settings: {} }, workouts, meals: [], weights: [] });
+    },
+    async saveMe(b) { const d = this.read(); d.user = { ...d.user, ...b }; this.write(d); return d.user; },
+    async save(kind, x) {
+      const d = this.read(), item = { ...x, id: x.id || ++d.seq };
+      if (kind === "workouts") item.volume = vol({ sets: item.sets });
+      d[kind] = [item, ...d[kind].filter(o => o.id !== item.id)];
+      this.write(d);
+      return item;
+    },
+    async remove(kind, id) { const d = this.read(); d[kind] = d[kind].filter(o => o.id !== id); this.write(d); },
+    async deleteMe() { store.set(K.demo, null); },
+  };
+  let db = demo;
 
-  function defaultApiBase() {
-    var isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-    if (location.protocol === "file:") return "http://localhost:8080/api";
-    return isLocal ? "http://localhost:8080/api" : location.origin + "/api";
+  // ---------- state ----------
+  const state = {
+    mode: "demo", store: "", user: null, workouts: [], meals: [], weights: [],
+    route: "home", enter: true, auth: { view: "signin", error: "", info: "", email: "" },
+    sheet: null, live: store.get(K.live, null), flash: null, armed: null,
+    range: "12w", exercise: "", admin: null, adminQ: "", preview: null, importing: null, busy: false,
+  };
+  const sortDesc = list => list.slice().sort(by(ts));
+  function load(d) {
+    state.user = d.user;
+    state.workouts = sortDesc(d.workouts || []);
+    state.meals = sortDesc(d.meals || []);
+    state.weights = sortDesc(d.weights || []);
+  }
+  const saveLive = () => store.set(K.live, state.live);
+  async function saveSettings(patch) {
+    const next = { ...settings(), ...patch };
+    state.user = await db.saveMe({ settings: next });
   }
 
-  function load(key, fallback) {
-    try {
-      var value = localStorage.getItem(key);
-      return value ? JSON.parse(value) : fallback;
-    } catch (error) {
-      return fallback;
-    }
-  }
-
-  function save(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
-  }
-
-  function uid() {
-    return Math.random().toString(36).slice(2, 10);
-  }
-
-  function loadLiveWorkout() {
-    return {
-      name: "New Workout",
-      startedAt: Date.now(),
-      heartRate: 0,
-      notes: "",
-      exercises: []
-    };
-  }
-
-  function setPage(page) {
-    location.hash = page;
-    state.page = page;
-  }
-
-  function toast(message) {
-    state.toast = message;
-    render();
-    setTimeout(function () {
-      if (state.toast === message) {
-        state.toast = "";
-        render();
-      }
-    }, 2600);
-  }
-
-  function persistAll() {
-    save(STORAGE.user, state.user);
-    save(STORAGE.admin, state.admin);
-    save(STORAGE.users, state.users);
-    save(STORAGE.passwords, state.passwords);
-    
-    if (state.user) {
-      save(STORAGE.workouts + "-" + state.user.id, state.workouts);
-      save(STORAGE.weight + "-" + state.user.id, state.weightLogs);
-      save(STORAGE.meals + "-" + state.user.id, state.meals);
-      save(STORAGE.health + "-" + state.user.id, state.healthData);
-      save(STORAGE.routines + "-" + state.user.id, state.routines);
-      save(STORAGE.integrations + "-" + state.user.id, state.integrations);
-      save(STORAGE.prefs + "-" + state.user.id, state.preferences);
-      save(STORAGE.profile + "-" + state.user.id, state.profile);
-      save("fitrank-health-import-details-" + state.user.id, state.healthImportDetails);
-    }
-  }
-
-  function hydrateResetContextFromUrl() {
-    try {
-      var params = new URLSearchParams(location.search);
-      var resetToken = params.get("resetToken");
-      var email = params.get("email");
-      if (resetToken && email) {
-        state.authMode = "reset";
-        state.pendingReset.email = decodeURIComponent(email);
-        state.pendingReset.token = resetToken;
-        state.page = "login";
-      }
-    } catch (error) {
-      // Ignore malformed reset params and keep the normal login flow.
-    }
-  }
-
-  function allowedPages() {
-    return state.admin ? ADMIN_PAGES : MEMBER_PAGES;
-  }
-
-  function ensureRouteAccess() {
-    if (state.user) {
-      for (var i = 0; i < state.users.length; i += 1) {
-        if (state.users[i].email === state.user.email) {
-          state.user.plan = state.users[i].plan;
-          break;
-        }
-      }
-    }
-
-    if (!state.user && state.page !== "login" && state.page !== "signup") {
-      state.page = "login";
-      location.hash = "login";
-      return;
-    }
-
-    if (!state.user) return;
-
-    if (state.admin && MEMBER_PAGES.indexOf(state.page) > -1 && ADMIN_PAGES.indexOf(state.page) === -1) {
-      state.page = "admin";
-      location.hash = "admin";
-      return;
-    }
-
-    if (!state.admin && state.page === "admin") {
-      state.page = "dashboard";
-      location.hash = "dashboard";
-      return;
-    }
-
-    if (allowedPages().indexOf(state.page) === -1) {
-      state.page = state.admin ? "admin" : "dashboard";
-      location.hash = state.page;
-    }
-  }
-
-  function isAdminUser() {
-    return !!state.admin;
-  }
+  // ---------- rendering ----------
+  const NAV = [
+    ["home", "Home", "home"], ["log", "Log", "log"], ["history", "History", "history"], ["progress", "Progress", "progress"],
+    ["routines", "Routines", "routines"], ["nutrition", "Nutrition", "food"], ["import", "Import", "import"],
+    ["insights", "Insights", "insights"], ["account", "Account", "account"], ["admin", "Admin", "admin"],
+  ];
+  const TABS = ["home", "log", "history", "progress"];
+  const routes = () => NAV.filter(n => n[0] !== "admin" || (state.user && state.user.role === "ADMIN"));
+  const PAGES = { home, log: logPage, history: historyPage, progress, routines, nutrition, import: importPage, insights, account, admin: adminPage };
 
   function render() {
-    persistAll();
-    ensureRouteAccess();
-    document.body.classList.toggle("unauthenticated", !state.user);
-    document.getElementById("app").innerHTML =
-      '<div class="page">' +
-        blobs() +
-        (!state.user ? renderAuth() : renderApp()) +
-        renderModal() +
-        (state.toast ? '<div class="toast">' + escapeHtml(state.toast) + '</div>' : "") +
-      "</div>";
+    $("#app").innerHTML = out(state.user ? shell() : authPage());
+    document.title = state.user ? `${(NAV.find(n => n[0] === state.route) || NAV[0])[1]} · FitRank` : "FitRank";
+    afterRender();
   }
 
-  function blobs() {
-    return '<div class="blob one"></div><div class="blob two"></div><div class="blob three"></div>';
+  function go(route, push = true, sheet = null) {
+    if (!PAGES[route] || !routes().some(n => n[0] === route)) route = "home";
+    if (push && location.hash !== "#/" + route) { history.pushState(null, "", "#/" + route); }
+    const swap = () => { state.route = route; state.enter = true; state.sheet = sheet; render(); scrollTo(0, 0); };
+    if (route === state.route) return swap();
+    document.startViewTransition && !calm.matches ? document.startViewTransition(swap) : swap();
+    if (route === "admin") loadAdmin();
   }
 
-  function renderAuth() {
-    return '' +
-      '<div class="auth-shell">' +
-        '<div class="auth-layout">' +
-          '<section class="glass-strong hero-card">' +
-            '<div class="brand"><img src="assets/icon.svg" alt="FitRank"><div><strong>FitRank</strong><p>Premium fitness tracking for web</p></div></div>' +
-            '<div>' +
-              '<p class="eyebrow">Web-first training OS</p>' +
-              '<h1><span class="gradient-text">Premium</span> workout tracking designed to actually work.</h1>' +
-              '<p>Responsive dashboard, seamless integrations, live logging, routines, nutrition, imports, premium coaching tools, and real local account management.</p>' +
-              '<div class="pill-row">' +
-                '<span>Apple Health import</span>' +
-                '<span>Hevy import</span>' +
-                '<span>Real progress charts</span>' +
-                '<span>Premium form demos</span>' +
-              '</div>' +
-            '</div>' +
-          '</section>' +
-          '<section class="glass auth-card">' + renderMemberCard() + '</section>' +
-        '</div>' +
-      '</div>';
+  const modeChip = () => state.mode === "server"
+    ? (state.store === "postgres"
+      ? h`<span class="chip ok" title="Signed in to the FitRank server; data is stored in PostgreSQL">${icon("server", 14)}Server</span>`
+      : h`<span class="chip warn" title="The server has no database: data is lost when it restarts">${icon("server", 14)}Server · not saved</span>`)
+    : h`<span class="chip" title="No server reachable: data is saved only in this browser">${icon("browser", 14)}Demo · this browser</span>`;
+
+  function shell() {
+    const r = state.route, u = state.user;
+    const navLink = ([id, label, ic]) => h`<a href="#/${id}" class="nav-link" ${r === id ? h`aria-current="page"` : ""}>${icon(ic)}<span>${label}</span></a>`;
+    return h`
+    <div class="shell">
+      <aside class="side">
+        <a class="brand" href="#/home"><img src="assets/icon.svg" alt="" width="30" height="30"><span>FitRank</span></a>
+        <nav aria-label="Main">${routes().map(navLink)}</nav>
+        <div class="side-foot">
+          ${modeChip()}
+          <div class="me"><span class="avatar">${initials(u.name)}</span><div><b>${u.name}</b><small>${premium() ? "Premium" : "Free plan"}</small></div></div>
+        </div>
+      </aside>
+      <header class="topbar">
+        <a class="brand" href="#/home"><img src="assets/icon.svg" alt="" width="26" height="26"><span>FitRank</span></a>
+        ${modeChip()}
+      </header>
+      <main id="main" class="main${state.enter && !calm.matches ? " enter" : ""}">${PAGES[r]()}</main>
+      <nav class="tabs" aria-label="Main">
+        ${TABS.map(id => navLink(NAV.find(n => n[0] === id)))}
+        <button class="nav-link" data-act="sheet" data-sheet="more" ${TABS.includes(r) ? "" : h`aria-current="page"`}>${icon("more")}<span>More</span></button>
+      </nav>
+      ${sheetView()}
+    </div>`;
   }
 
-  function renderMemberCard() {
-    var signup = state.authMode === "signup";
-    if (state.authMode === "reset") {
-      return '' +
-        '<div class="brand"><img src="assets/icon.svg" alt="FitRank"><div><strong>Reset Password</strong><p>Create a new password for your account</p></div></div>' +
-        '<div style="height:16px"></div>' +
-        '<form class="auth-form" data-form="reset">' +
-          field('Email', '<input type="email" name="email" value="' + escapeAttr(state.pendingReset.email) + '" required>') +
-          field('Reset Token', '<input name="token" value="' + escapeAttr(state.pendingReset.token) + '" required>') +
-          field('New Password', '<input type="password" name="password" required>') +
-          field('Confirm Password', '<input type="password" name="confirmPassword" required>') +
-          (state.authInfo ? '<div class="success-banner">' + escapeHtml(state.authInfo) + '</div>' : "") +
-          (state.authError ? '<div class="auth-error">' + escapeHtml(state.authError) + "</div>" : "") +
-          '<button class="btn" type="submit">Reset Password</button>' +
-        "</form>" +
-        '<div style="height:16px"></div>' +
-        '<p class="auth-toggle"><button type="button" data-action="back-to-login">Back to login</button></p>';
+  const initials = name => String(name || "FR").trim().split(/\s+/).slice(0, 2).map(p => p[0].toUpperCase()).join("");
+  const count = (value, fmt = "int", suffix = "") => h`<span class="num" data-count="${value}" data-fmt="${fmt}">${formatCount(value, fmt)}</span>${suffix}`;
+  const formatCount = (v, fmt) => fmt === "vol" ? fmtVol(v) : fmt === "w" ? fmtW(v) : fmt === "1" ? n1(v) : Math.round(v).toLocaleString();
+  const empty = (ic, title, text, action) => h`<div class="empty">${icon(ic, 28)}<h3>${title}</h3><p>${text}</p>${action || ""}</div>`;
+  const armedBtn = (key, act, label, extra = "") => state.armed === key
+    ? h`<button class="btn danger" data-act="${act}" data-key="${key}" ${new Raw(extra)}>${icon("trash", 16)}Tap again to confirm</button>`
+    : h`<button class="btn danger-quiet" data-act="arm" data-key="${key}">${icon("trash", 16)}${label}</button>`;
+
+  /** Ring gauge. pct 0-100 (values above 100 draw a full ring). */
+  function dial(label, pct, value, sub, tone = "accent") {
+    const off = 100 - clamp(pct, 0, 100);
+    return h`<div class="dial tone-${tone}${pct > 0 ? "" : " zero"}">
+      <svg viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="52" pathLength="100"/><circle class="val" cx="60" cy="60" r="52" pathLength="100" style="--off:${off}"/></svg>
+      <div class="dial-text"><b>${value}</b><span>${label}</span></div>
+      <p class="dial-sub">${sub}</p>
+    </div>`;
+  }
+
+  function bars(series, fmt = v => fmtVol(v), opts = {}) {
+    const max = Math.max(...series.map(s => s.value), 0);
+    if (!max) return empty("progress", opts.emptyTitle || "Nothing logged yet", opts.emptyText || "Finished workouts show up here.");
+    const last = series.length - 1, ref = opts.ref && opts.ref.value ? Math.min(opts.ref.value / max, 1) * 100 : 0;
+    return h`<div class="bars" role="img" aria-label="${opts.label || "Bar chart"}">
+      ${ref ? h`<div class="bar-ref" style="--y:${ref}"><span>${opts.ref.label} ${fmt(opts.ref.value)}</span></div>` : ""}
+      ${series.map((s, i) => h`<div class="bar-col" style="--i:${i}">
+        <div class="bar${i === last ? " now" : ""}" style="--h:${(s.value / max) * 100}%" tabindex="0" aria-label="${s.label}: ${fmt(s.value)}"><span class="tip">${fmt(s.value)}</span></div>
+        <span class="bar-label">${i === 0 || i === last || i === Math.floor(last / 2) ? s.label : ""}</span>
+      </div>`)}
+    </div>`;
+  }
+
+  /** Line + area chart with a pointer scrubber. points: [{t, v, label}] in time order. */
+  function line(points, fmt, opts = {}) {
+    if (points.length < 2) return empty(opts.icon || "progress", opts.emptyTitle || "Not enough data", opts.emptyText || "Log this at least twice to see a trend.");
+    const vs = points.map(p => p.v), lo = Math.min(...vs), hi = Math.max(...vs), pad = (hi - lo) * 0.15 || hi * 0.05 || 1;
+    const min = lo - pad, max = hi + pad, t0 = points[0].t, span = points[points.length - 1].t - t0 || 1;
+    const xy = points.map(p => [((p.t - t0) / span) * 100, 100 - ((p.v - min) / (max - min)) * 100]);
+    let d = `M${xy[0][0]},${xy[0][1]}`;
+    for (let i = 1; i < xy.length; i++) { // smooth curve through the points
+      const [x0, y0] = xy[i - 1], [x1, y1] = xy[i], cx = (x1 - x0) / 2;
+      d += ` C${x0 + cx},${y0} ${x1 - cx},${y1} ${x1},${y1}`;
     }
-    return '' +
-      '<div class="brand"><img src="assets/icon.svg" alt="FitRank"><div><strong>FitRank Access</strong><p>' + (signup ? "Create your account" : "Welcome back") + '</p></div></div>' +
-      '<div style="height:16px"></div>' +
-      '<form class="auth-form" data-form="member">' +
-        (signup ? field('Full Name', '<input name="fullName" placeholder="Arjun Nair" required>') : "") +
-        field('Email', '<input type="email" name="email" value="athlete@fitrank.app" required>') +
-        field('Password', '<input type="' + (state.showPassword ? "text" : "password") + '" name="password" value="password" required><button type="button" data-action="toggle-password">' + (state.showPassword ? "Hide" : "Show") + "</button>") +
-        (signup ? field('Confirm Password', '<input type="password" name="confirmPassword" required>') : "") +
-        (signup ? field('Fitness Goal', '<select name="goal"><option>Lose Weight</option><option>Gain Muscle</option><option selected>Strength</option><option>General Fitness</option></select>') : "") +
-        (!signup ? '<div class="helper-row"><label class="checkbox"><input type="checkbox" ' + (state.rememberMe ? "checked" : "") + ' data-action="remember-me"> Remember Me</label><button type="button" class="btn-ghost" data-action="forgot">Forgot Password</button></div>' : "") +
-        (state.authInfo ? '<div class="success-banner">' + escapeHtml(state.authInfo) + '</div>' : "") +
-        (state.authError ? '<div class="auth-error">' + escapeHtml(state.authError) + "</div>" : "") +
-        '<button class="btn" type="submit">' + (signup ? "Create Account" : "Login") + "</button>" +
-      "</form>" +
-      '<div style="height:16px"></div>' +
-      '<p>Admin access uses the same login form. Use the admin credentials here to unlock admin controls.</p>' +
-      '<p class="auth-toggle">' + (signup ? "Already have an account?" : "Don&apos;t have an account?") + ' <button type="button" data-action="toggle-auth">' + (signup ? "Login" : "Sign Up") + "</button></p>";
+    const data = points.map((p, i) => [+xy[i][0].toFixed(2), +xy[i][1].toFixed(2), p.label, fmt(p.v)]);
+    const lastP = xy[xy.length - 1];
+    return h`<div class="line-chart" data-points="${JSON.stringify(data)}" role="img" aria-label="${opts.label || "Trend"}: ${fmt(vs[0])} to ${fmt(vs[vs.length - 1])}">
+      <div class="y-axis"><span>${fmt(max - pad)}</span><span>${fmt(min + pad)}</span></div>
+      <div class="plot">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          <defs><linearGradient id="fill-${opts.id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".32"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+          <path class="area" d="${d} L100,100 L0,100 Z" fill="url(#fill-${opts.id})"/>
+          <path class="stroke" d="${d}" pathLength="1"/>
+        </svg>
+        <span class="end-dot" style="left:${lastP[0]}%;top:${lastP[1]}%"></span>
+        <div class="scrub" hidden><span class="scrub-dot"></span><span class="scrub-tip"></span></div>
+      </div>
+      <div class="x-axis"><span>${points[0].label}</span><span>${points[points.length - 1].label}</span></div>
+    </div>`;
   }
 
-  function renderApp() {
-    return '' +
-      '<div class="app-shell">' +
-        '<div class="layout">' +
-          renderSidebar() +
-          '<main class="main">' +
-            renderTopbar() +
-            '<section class="content">' + renderPage() + "</section>" +
-          "</main>" +
-        "</div>" +
-        renderMobileNav() +
-      "</div>";
+  // ---------- pages ----------
+  function home() {
+    const now = Date.now(), wk = thisWeek(), s = settings();
+    const week = inRange(state.workouts, wk);
+    const weekVol = sum(week, vol);
+    const avg = sum(inRange(state.workouts, wk - 4 * WEEK, wk), vol) / 4;
+    const loadPct = avg ? (weekVol / avg) * 100 : weekVol ? 100 : 0;
+    const target = s.target || 4;
+    const today = state.meals.filter(m => dayKey(ts(m)) === dayKey(now));
+    const kcal = sum(today, m => m.calories), kcalTarget = s.kcal || 2400;
+    const last = state.workouts[0];
+    const hour = new Date().getHours();
+    const prs = recentRecords(30).slice(0, 4);
+    return h`
+      <section class="hello" style="--i:0">
+        <div>
+          <h1>${hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening"}, ${state.user.name.split(" ")[0]}</h1>
+          <p class="muted">${fmtDate(now, { weekday: "long", month: "long", day: "numeric" })} · ${streakText()}</p>
+        </div>
+        ${state.live
+          ? h`<a class="btn primary big" href="#/log">${icon("play", 18)}Resume ${state.live.title}</a>`
+          : h`<button class="btn primary big" data-act="start">${icon("plus", 18)}Start workout</button>`}
+      </section>
+      <section class="card dials" style="--i:1" aria-label="This week">
+        ${dial("Weekly load", loadPct, h`${count(weekVol, "vol")}<small>${unit()}</small>`, avg ? `${Math.round(loadPct)}% of your 4‑week average` : "No 4‑week baseline yet")}
+        ${dial("Sessions", (week.length / target) * 100, h`${count(week.length)}<small>/${target}</small>`, week.length >= target ? "Weekly target hit" : `${target - week.length} to go this week`, "good")}
+        ${dial("kcal today", (kcal / kcalTarget) * 100, count(kcal), `${Math.round(sum(today, m => m.protein))} g protein of ${s.protein || 160} g`, "warm")}
+      </section>
+      <div class="grid two">
+        <section class="card" style="--i:2">
+          <header class="card-head"><h2>Last workout</h2><a class="link" href="#/history">History</a></header>
+          ${last ? workoutSummary(last) : empty("log", "No workouts yet", "Start one, or import your Hevy history.", h`<a class="btn" href="#/import">${icon("import", 16)}Import</a>`)}
+        </section>
+        <section class="card" style="--i:3">
+          <header class="card-head"><h2>Volume per week</h2><span class="muted">${unit()} · 12 weeks</span></header>
+          ${bars(weekly(12), fmtVol, { label: "Weekly volume", ref: { value: avg, label: "4-wk avg" } })}
+        </section>
+      </div>
+      <section class="card" style="--i:4">
+        <header class="card-head"><h2>Recent records</h2><span class="muted">Last 30 days</span></header>
+        ${prs.length ? h`<ul class="records">${prs.map(p => h`<li>${icon("trophy", 18)}<div><b>${p.exercise}</b><span class="muted">${fmtW(p.weight)} ${unit()} × ${p.reps} · e1RM ${fmtW(p.e1)} ${unit()}</span></div><time>${ago(p.t)}</time></li>`)}</ul>`
+          : empty("trophy", "No new records this month", "Beat an estimated 1RM and it lands here.")}
+      </section>`;
   }
 
-  function renderSidebar() {
-    var items = state.admin ? [
-      ["admin", "Admin Dashboard"]
-    ] : [
-      ["dashboard", "Dashboard"],
-      ["workouts", "Workouts"],
-      ["routines", "Routines"],
-      ["progress", "Progress"],
-      ["analytics", "Analytics"],
-      ["nutrition", "Nutrition"],
-      ["integrations", "Integrations"],
-      ["profile", "Profile"],
-      ["settings", "Settings"],
-      ["pro", "Premium"]
-    ];
-
-    return '' +
-      '<aside class="sidebar">' +
-        '<div class="glass sidebar-inner">' +
-          '<div class="brand"><img src="assets/icon.svg" alt="FitRank"><div><strong>FitRank</strong><p>Premium workout OS</p></div></div>' +
-          '<div style="height:22px"></div>' +
-          '<div class="nav-list">' +
-            items.map(function (item) {
-              return '<button class="nav-item ' + (state.page === item[0] ? "active" : "") + '" data-nav="' + item[0] + '">' + item[1] + "<span>&rsaquo;</span></button>";
-            }).join("") +
-          "</div>" +
-        "</div>" +
-      "</aside>";
+  function streakText() {
+    let weeks = 0, start = thisWeek();
+    if (!inRange(state.workouts, start).length) start -= WEEK;
+    while (inRange(state.workouts, start, start + WEEK).length) { weeks++; start -= WEEK; }
+    return weeks ? `${weeks}-week training streak` : "No streak yet";
   }
 
-  function renderTopbar() {
-    return '' +
-      '<div class="glass topbar">' +
-        '<div class="topbar-inner">' +
-          '<div class="field-shell search-shell"><input value="' + escapeAttr(state.search) + '" placeholder="Search exercises, routines, history..." data-input="search"></div>' +
-          '<div class="topbar-right">' +
-            (!state.admin ? '<button class="btn" data-nav="workouts">Quick Start Workout</button>' : "") +
-            '<div class="user-chip"><div class="avatar">' + escapeHtml((state.user.name || "FR").slice(0, 2).toUpperCase()) + "</div><div><strong>" + escapeHtml(state.user.name) + "</strong><p>" + escapeHtml(state.user.email) + '</p></div><button class="btn-ghost" data-action="logout">Log out</button></div>' +
-          "</div>" +
-        "</div>" +
-      "</div>";
-  }
-
-  function renderPage() {
-    switch (state.page) {
-      case "dashboard": return renderDashboard();
-      case "workouts": return renderWorkouts();
-      case "routines": return renderRoutines();
-      case "progress": return renderProgress();
-      case "analytics": return renderAnalytics();
-      case "nutrition": return renderNutrition();
-      case "integrations": return renderIntegrations();
-      case "profile": return renderProfile();
-      case "settings": return renderSettings();
-      case "pro": return renderPro();
-      case "admin": return renderAdmin();
-      default: return state.admin ? renderAdmin() : renderDashboard();
-    }
-  }
-
-  function renderDashboard() {
-    var stats = dashboardStats();
-    return '' +
-      '<div class="cards-two">' +
-        '<section class="glass-strong panel hero-panel">' +
-          '<div><p class="eyebrow">Dashboard</p><h2>Welcome back, ' + escapeHtml(state.user.name) + '.</h2><p>Your training hub combines workouts, recovery, nutrition, imports, and progress built from your actual saved data.</p></div>' +
-          '<div class="quick-actions">' +
-            button("Start Workout", "workouts", true) +
-            button("Continue Routine", "routines", false) +
-            button("Log Weight", "progress", false) +
-            button("Nutrition", "nutrition", false) +
-          "</div>" +
-        "</section>" +
-        '<section class="glass panel"><p class="eyebrow">Import Snapshot</p><div class="cards-two">' +
-          metric("Imported steps", number(state.healthData.steps)) +
-          metric("Workout history", String(state.workouts.length)) +
-          metric("Meal logs", String(state.meals.length)) +
-          metric("Weight logs", String(state.weightLogs.length)) +
-          '</div><div style="height:16px"></div><div class="mini-card"><strong>' + escapeHtml(stats.quote) + '</strong><p>Motivational quote</p></div></section>' +
-      "</div>" +
-      '<div class="stats-four">' +
-        stat("Workout streak", stats.streak + " days", "Based on real saved workouts") +
-        stat("Weekly calories burned", number(stats.weeklyCalories), "From workout history") +
-        stat("Goal progress", stats.goalProgress + "%", stats.goalHelper) +
-        stat("Nutrition progress", mealProgress() + "%", "From meal logging") +
-      "</div>" +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>Goal Progress Rings</h3><div class="ring-grid">' +
-          ring("Workouts", stats.goalProgress) +
-          ring("Recovery", number(stats.recoveryProgress)) +
-          ring("Nutrition", mealProgress()) +
-        '</div></section>' +
-        '<section class="glass panel"><h3>Recent Workouts</h3>' +
-          (recentWorkouts().length
-            ? recentWorkouts().map(function (workout) {
-                return '<div class="mini-card"><strong>' + escapeHtml(workout.title) + '</strong><p>' + formatDateTime(workout.createdAt) + ' | ' + workout.durationMinutes + ' min | ' + number(workout.volume) + ' kg</p></div>';
-              }).join('')
-            : '<p>No workouts yet. Start a session to populate your dashboard.</p>') +
-        '</section>' +
-      '</div>';
-  }
-
-  function renderWorkouts() {
-    return '' +
-      '<div class="page-head">' +
-        '<div><p class="eyebrow">Live Workout Tracker</p><h2>' + escapeHtml(state.liveWorkout.name) + '</h2><p>Start blank, choose exercises from the library, and log only what you actually perform.</p></div>' +
-        '<div class="button-row">' +
-          '<div class="mini-card"><strong id="workout-timer-display">' + workoutTimer() + '</strong><p>Running Timer</p></div>' +
-          '<div class="mini-card"><strong>' + String(state.liveWorkout.exercises.length) + '</strong><p>Exercises Added</p></div>' +
-          '<button class="btn" data-action="finish-workout">Finish Workout</button>' +
-        "</div>" +
-      "</div>" +
-      (state.liveWorkout.exercises.length
-        ? state.liveWorkout.exercises.map(renderExerciseCard).join("")
-        : '<section class="glass panel empty-state"><h3>Blank workout ready</h3><p>No exercises have been added yet. Choose from the exercise library to start this session.</p><div class="button-row"><button class="btn" data-action="add-exercise">Choose Exercise</button></div></section>') +
-      '<button class="floating-add" data-action="add-exercise">+ Add Exercise</button>';
-  }
-
-  function renderExerciseCard(exercise) {
-    return '' +
-      '<section class="glass panel">' +
-        '<div class="page-head">' +
-          '<div><h3>' + escapeHtml(exercise.name) + '</h3><p>Replace, reorder, add notes, delete, and auto-complete sets.</p></div>' +
-          '<div class="button-row">' +
-            '<button class="btn-secondary" data-action="move-up" data-exercise="' + exercise.id + '">Move Up</button>' +
-            '<button class="btn-secondary" data-action="move-down" data-exercise="' + exercise.id + '">Move Down</button>' +
-            '<button class="btn-secondary" data-action="delete-exercise" data-exercise="' + exercise.id + '">Delete</button>' +
-          "</div>" +
-        "</div>" +
-        '<div class="table-card">' +
-          '<table class="table">' +
-            "<thead><tr><th>Set</th><th>Previous</th><th>Weight</th><th>Reps</th><th>Done</th></tr></thead>" +
-            "<tbody>" +
-              exercise.sets.map(function (set, index) {
-                return "<tr>" +
-                  "<td>" + (index + 1) + "</td>" +
-                  "<td>" + escapeHtml(set.previous) + "</td>" +
-                  '<td><input value="' + escapeAttr(set.weight) + '" data-input="set-weight" data-exercise="' + exercise.id + '" data-set="' + set.id + '"></td>' +
-                  '<td><input value="' + escapeAttr(set.reps) + '" data-input="set-reps" data-exercise="' + exercise.id + '" data-set="' + set.id + '"></td>' +
-                  '<td><button class="done-pill ' + (set.done ? "active" : "") + '" data-action="toggle-set" data-exercise="' + exercise.id + '" data-set="' + set.id + '">' + (set.done ? "Done" : "Mark") + "</button></td>" +
-                "</tr>";
-              }).join("") +
-            "</tbody>" +
-          "</table>" +
-        "</div>" +
-        '<div class="button-row">' +
-          '<button class="btn-secondary" data-action="add-set" data-exercise="' + exercise.id + '">Add Set</button>' +
-          '<button class="btn-secondary" data-action="replace-exercise" data-exercise="' + exercise.id + '">Replace Exercise</button>' +
-          '<button class="btn-secondary" data-action="show-form" data-exercise="' + exercise.id + '">Show Form</button>' +
-          '<button class="btn-secondary" data-action="exercise-notes" data-exercise="' + exercise.id + '">Notes</button>' +
-          '<button class="btn-secondary" data-action="rest-timer">Rest Timer</button>' +
-        "</div>" +
-      "</section>";
-  }
-
-  function renderRoutines() {
-    return '' +
-      '<div class="page-head"><div><p class="eyebrow">Routines</p><h2>Saved Templates</h2></div><button class="btn" data-action="create-routine">Create Routine</button></div>' +
-      '<div class="routine-grid cards-two">' +
-        state.routines.map(function (routine) {
-          var exCount = (routine.exercises && routine.exercises.length) || 0;
-          return '<div class="glass panel routine-card"><h3>' + escapeHtml(routine.name) + '</h3><p>' + escapeHtml(routine.focus) + '</p><p>' + escapeHtml(routine.days) + (exCount ? ' | ' + exCount + ' exercises' : '') + '</p><div class="button-row"><button class="btn" data-action="start-routine" data-routine="' + routine.id + '">Start</button><button class="btn-secondary" data-action="edit-routine" data-routine="' + routine.id + '">Edit</button><button class="btn-secondary" data-action="duplicate-routine" data-routine="' + routine.id + '">Duplicate</button><button class="btn-secondary" data-action="delete-routine" data-routine="' + routine.id + '">Delete</button></div></div>';
-        }).join("") +
-      '</div>';
-  }
-
-  function renderProgress() {
-    var analytics = buildAnalytics();
-    var prCards = analytics.prs.map(function (item) {
-      return '<div class="mini-card"><strong>' + escapeHtml(item.label) + '</strong><p>' + escapeHtml(item.value) + '</p></div>';
-    }).join("");
-    var heatCards = analytics.heat.map(function (item) {
-      return '<div class="heat-cell" style="background:rgba(79,124,255,' + (0.12 + item.count * 0.08) + ')"><strong>' + escapeHtml(item.group) + '</strong><p>' + item.count + ' sessions</p></div>';
-    }).join("");
-
-    return '' +
-      '<div class="page-head">' +
-        '<div><p class="eyebrow">Progress & Analytics</p><h2>Your training history visualised</h2></div>' +
-        '<div class="button-row">' +
-          select('range-filter', state.dateRange, ['3d', '7d', '1m', '1y']) +
-          select('exercise-filter', state.selectedExercise, exerciseOptions()) +
-          '<button class="btn-secondary" data-action="export-data">Export Data</button>' +
-        '</div>' +
-      '</div>' +
-      '<div class="cards-two">' +
-        chartCard('Monthly Volume (kg)', renderBars(analytics.monthlyVolume)) +
-        chartCard('Sessions per Month', renderBars(analytics.monthlySessions)) +
-        chartCard('Strength: ' + analytics.topExercise, renderLineChart(analytics.strength)) +
-        chartCard('Body Weight (kg)', renderLineChart(analytics.bodyWeight)) +
-        chartCard('Workout Consistency (days)', renderLineChart(analytics.consistency)) +
-        chartCard('Muscle Group Frequency', '<div class="heatmap" style="margin-top:4px;">' + heatCards + '</div>') +
-      '</div>' +
-      '<div class="cards-three">' +
-        '<section class="glass panel"><h3>PR Tracker</h3>' + prCards + '</section>' +
-        '<section class="glass panel"><h3>All-time Stats</h3>' +
-          '<div class="stats-four">' +
-            stat('Total Workouts', String(state.workouts.length), 'Logged') +
-            stat('Total Volume', number(analytics.totalVolume) + ' kg', 'All time') +
-            stat('Best Month', analytics.bestMonth, 'By volume') +
-            stat('Avg Session', number(Math.round(analytics.averageVolume)) + ' kg', 'Per workout') +
-          '</div>' +
-        '</section>' +
-        '<section class="glass panel"><h3>Log Body Weight</h3>' +
-          field('Weight (kg)', '<input data-input="weight-log" value="' + escapeAttr(state.pendingWeight) + '" placeholder="e.g. 72.5">') +
-          '<div class="button-row"><button class="btn" data-action="save-weight">Save Weight</button></div>' +
-          '<div style="height:12px"></div>' +
-          '<div class="mini-card"><strong>' + analytics.recoveryScore + '%</strong><p>Recovery score from imported heart-rate data.</p></div>' +
-        '</section>' +
-      '</div>';
-  }
-
-  function renderAnalytics() {
-    var premium = isPremiumUser();
-    var analytics = buildAnalytics();
-    if (!premium) {
-      return '' +
-        '<div class="cards-two">' +
-          '<section class="glass panel"><p class="eyebrow">Premium Analytics</p><h2>Premium required</h2><p>Free members can use Progress charts. Premium unlocks recovery summaries, 1RM tracking, goal forecasting, AI coaching insights, and exports. Ask an admin to upgrade your account.</p>' +
-          '<div class="button-row" style="margin-top:16px"><button class="btn" data-nav="pro">View Premium Features</button></div></section>' +
-          '<section class="glass panel"><h3>Available on Free</h3><div class="pill-row"><span>Workout logging</span><span>Routine library</span><span>Progress charts</span><span>Nutrition logging</span><span>Hevy import</span><span>Apple Health import</span></div></section>' +
-        '</div>';
-    }
-
-    var oneRM = computeBest1RM();
-    var forecast = computeGoalForecast();
-    var heatCards = analytics.heat.map(function (item) {
-      var intensity = Math.min(1, 0.15 + item.count * 0.12);
-      return '<div class="heat-cell" style="background:rgba(138,92,255,' + intensity + ')"><strong>' + escapeHtml(item.group) + '</strong><p>' + item.count + ' sets</p></div>';
-    }).join('');
-
-    return '' +
-      '<div class="cards-three">' +
-        '<section class="glass panel"><h3>Advanced Analytics</h3>' +
-          metric('Recovery score', analytics.recoveryScore + '%') +
-          metric('Resting HR', (analytics.restingHeartRate || '--') + ' bpm') +
-          metric('Average volume / session', number(Math.round(analytics.averageVolume)) + ' kg') +
-          metric('Total workouts in range', String(analytics.workoutCount)) +
-        '</section>' +
-        '<section class="glass panel"><h3>AI Coaching Insight</h3><p>' + escapeHtml(trainingInsight(analytics)) + '</p>' +
-          '<div style="height:12px"></div>' +
-          (analytics.averageVolume > 0 ? '<div class="mini-card"><strong>Volume trend</strong><p>' + (analytics.averageVolume > 3000 ? 'Strong volume. Consider deload after 3 more sessions.' : 'Volume is moderate. Add one set per exercise to progress.') + '</p></div>' : '') +
-          '<div class="pill-row" style="margin-top:12px"><span>' + analytics.workoutCount + ' sessions logged</span><span>' + (analytics.importedHealth ? 'Health data active' : 'Import Apple Health for deeper insights') + '</span></div>' +
-        '</section>' +
-        '<section class="glass panel"><h3>Goal Pace Forecast &#x1F3AF;</h3>' +
-          '<div class="mini-card"><strong>' + forecast.label + '</strong><p>' + forecast.detail + '</p></div>' +
-          '<div style="height:10px"></div>' +
-          '<div class="mini-card"><strong>Current pace</strong><p>' + forecast.pace + ' workouts/week on average</p></div>' +
-        '</section>' +
-      '</div>' +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>Estimated 1RM Tracker ðŸ‹ï¸</h3>' +
-          (oneRM.length ? oneRM.map(function (item) {
-            return '<div class="mini-card"><strong>' + escapeHtml(item.exercise) + '</strong><p>Best set: ' + item.weight + ' kg Ã— ' + item.reps + ' reps â†’ Estimated 1RM: <strong>' + item.oneRM + ' kg</strong></p></div>';
-          }).join('') : '<p>Log sets with weight and reps to see 1RM estimates.</p>') +
-        '</section>' +
-        '<section class="glass panel"><h3>Muscle Group Heatmap &#x1F525;</h3>' +
-          '<div class="heatmap">' + heatCards + '</div>' +
-          '<div style="height:12px"></div>' +
-          '<p style="font-size:13px;color:var(--muted)">Based on ' + analytics.workoutCount + ' logged sessions. Darker = more volume.</p>' +
-        '</section>' +
-      '</div>';
-  }
-
-  function renderNutrition() {
-    var summary = nutritionSummary();
-    return '' +
-      '<div class="cards-three">' +
-        '<section class="glass panel"><h3>Nutrition Dashboard</h3><div class="stats-four">' +
-          stat("Calories", number(summary.calories), "Logged today") +
-          stat("Protein", number(summary.protein) + "g", "Meal logging") +
-          stat("Water", number(summary.water) + "L", "Hydration") +
-          stat("Meals", String(summary.meals), "Saved entries") +
-        "</div></section>" +
-        '<section class="glass panel"><h3>Log Meal</h3>' +
-          field("Food Eaten", '<input data-input="meal-name" value="' + escapeAttr(state.pendingMeal.name) + '" placeholder="Chicken rice bowl">') +
-          field("Calories", '<input data-input="meal-calories" value="' + escapeAttr(state.pendingMeal.calories) + '" placeholder="650">') +
-          field("Protein (g)", '<input data-input="meal-protein" value="' + escapeAttr(state.pendingMeal.protein) + '" placeholder="42">') +
-          field("Water (L)", '<input data-input="meal-water" value="' + escapeAttr(state.pendingMeal.water) + '" placeholder="0.7">') +
-          '<div class="button-row"><button class="btn" data-action="save-meal">Save Meal</button></div>' +
-        "</section>" +
-        '<section class="glass panel"><h3>Meal History</h3>' +
-          (state.meals.length
-            ? state.meals.slice(0, 8).map(function (meal) {
-                return '<div class="mini-card"><strong>' + escapeHtml(meal.name) + "</strong><p>" + number(meal.calories) + " kcal - " + number(meal.protein) + "g protein - " + number(meal.water) + "L water</p></div>";
-              }).join("")
-            : "<p>No meals logged yet.</p>") +
-        "</section>" +
-      "</div>";
-  }
-
-  function renderIntegrations() {
-    var premium = isPremiumUser();
-    var hasHealth = state.integrations.appleHealth.connected && state.healthData.importedAt;
-    return '' +
-      '<div class="page-head"><div><p class="eyebrow">Integrations</p><h2>Apple Health, Apple Watch, and Hevy import</h2><p>FitRank only shows data that was actually imported or entered in the app.</p></div></div>' +
-      '<div class="cards-two">' +
-        '<section class="glass panel integration-card"><h3>Apple Health</h3><p>' +
-          (hasHealth
-            ? "Imported from " + escapeHtml(state.healthData.source || "Health export") + " on " + formatDateTime(state.integrations.appleHealth.lastSync)
-            : "Direct browser access is not possible. Import an Apple Health export file now, or pair this app with a native iOS bridge later.") +
-          '</p><div class="button-row"><label class="btn-secondary" style="cursor:pointer;">Import Health Export<input class="hidden" type="file" data-input="health-file" accept=".xml,.json,.txt" style="position:absolute;opacity:0;width:0;height:0;"></label><button class="btn-secondary" data-action="toggle-auto-sync" data-key="appleHealth">Import Status ' + (state.integrations.appleHealth.autoSync ? "Tracked" : "Manual") + '</button></div></section>' +
-        '<section class="glass panel integration-card"><h3>Apple Watch</h3><p>' +
-          (state.integrations.appleWatch.connected
-            ? "Watch-derived heart rate was detected in the imported health export."
-            : "Live watch sync requires the same iOS HealthKit bridge as Apple Health. This web build supports import-based workflows only.") +
-          '</p><div class="button-row"><button class="btn-secondary" data-action="import-health-export">Import Watch Data</button></div></section>' +
-        '<section class="glass panel integration-card"><h3>Hevy Import</h3><p>' +
-          (state.integrations.hevyImport.connected
-            ? "Last import " + formatDateTime(state.integrations.hevyImport.lastSync)
-            : "Import actual CSV or JSON exports from Hevy to merge workouts, routines, and weight history.") +
-          '</p><div class="button-row">' +
-          '<label class="btn" style="cursor:pointer;">Import Hevy File<input class="hidden" type="file" data-input="hevy-file" accept=".csv,.json" style="position:absolute;opacity:0;width:0;height:0;"></label>' +
-          (premium
-            ? '<button class="btn-secondary" data-action="toggle-auto-sync" data-key="hevyImport">Duplicate Detection ' + (state.integrations.hevyImport.autoSync ? "On" : "Off") + '</button>'
-            : '<span class="badge">Duplicate detection is premium</span>') +
-          '</div></section>' +
-        '<section class="glass panel integration-card"><h3>Premium Device Insights</h3><p>' +
-          (premium ? "Premium insights are unlocked for this user." : "Premium device insights are restricted. Ask an admin to upgrade this account to unlock deeper device analytics.") +
-          '</p><div class="button-row">' + (premium ? '<span class="badge">Premium active</span>' : '<span class="badge">Admin upgrade required</span>') + "</div></section>" +
-      "</div>" +
-      '<section class="glass panel"><h3>Import Preview</h3>' +
-        (state.importPreview.length
-          ? state.importPreview.map(function (item) {
-              return '<div class="mini-card"><strong>' + escapeHtml(item.title) + "</strong><p>" + escapeHtml(item.source) + " - " + escapeHtml(item.merge) + "</p></div>";
-            }).join("")
-          : "<p>No import preview yet.</p>") +
-      "</section>" +
-      '<section class="glass panel"><h3>Latest Apple Health Snapshot</h3>' +
-        (hasHealth
-          ? '<div class="stats-four">' +
-              stat("Steps", number(state.healthData.steps), "Imported value") +
-              stat("Active Calories", number(state.healthData.activeCalories), "Imported value") +
-              stat("Heart Rate", number(state.healthData.heartRate) + " bpm", "Imported value") +
-              stat("Recovery", number(state.healthData.recovery) + "%", "Derived from imported heart rate") +
-            '</div>' + (state.healthImportDetails.length ? '<div style="height:14px"></div><div class="cards-three">' + state.healthImportDetails.map(function (item) {
-              return '<div class="mini-card"><strong>' + escapeHtml(item.value) + '</strong><p>' + escapeHtml(item.label) + '</p></div>';
-            }).join("") + '</div>' : "")
-          : "<p>No Apple Health data imported yet.</p>") +
-      "</section>";
-  }
-
-  function renderProfile() {
-    return '' +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><div class="avatar" style="width:88px;height:88px;border-radius:28px;font-size:24px;">' + escapeHtml(state.profile.avatar) + '</div><div style="height:16px"></div><h2>' + escapeHtml(state.profile.fullName) + "</h2><p>" + escapeHtml(state.profile.bio) + '</p><div class="stats-four">' +
-          stat("Plan", escapeHtml(state.user.plan), "Current membership") +
-          stat("Total workouts", String(state.workouts.length), "Saved") +
-          stat("Meal logs", String(state.meals.length), "Saved") +
-          stat("Weight logs", String(state.weightLogs.length), "Saved") +
-        "</div></section>" +
-        '<section class="glass panel"><h3>Edit Profile</h3>' +
-          field("Full Name", '<input data-input="profile-name" value="' + escapeAttr(state.profile.fullName) + '">') +
-          field("Bio", '<textarea data-input="profile-bio">' + escapeHtml(state.profile.bio) + "</textarea>") +
-          '<div class="mini-card"><strong>Join date</strong><p>' + formatShortDate(state.profile.joinDate) + "</p></div>" +
-        "</section>" +
-      "</div>";
-  }
-
-  function renderSettings() {
-    var premium = isPremiumUser();
-    return '' +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>Account</h3>' +
-          field("Change Password", '<input placeholder="New password">') +
-          '<div class="button-row"><button class="btn-secondary">Email Preferences</button><button class="btn-secondary">Delete Account</button></div>' +
-        "</section>" +
-        '<section class="glass panel"><h3>Workout Preferences</h3>' +
-          switchRow("Autocomplete sets", state.preferences.autoComplete, "toggle-pref", "autoComplete") +
-          switchRow("Smart suggestions", state.preferences.smartSuggestions, "toggle-pref", "smartSuggestions") +
-          '<div class="form-row">' +
-            select("pref-units", state.preferences.units, ["kg", "lbs"]) +
-            select("pref-distance", state.preferences.distance, ["km", "miles"]) +
-            select("pref-rest", String(state.preferences.restTimer), ["60", "90", "120"]) +
-            select("pref-sync", state.preferences.syncFrequency, ["Manual", "Hourly", "Daily"]) +
-          "</div>" +
-        "</section>" +
-        '<section class="glass panel"><h3>Notifications</h3>' +
-          switchRow("Workout reminders", true, "noop", "") +
-          switchRow("Recovery alerts", true, "noop", "") +
-          switchRow("Goal milestone alerts", true, "noop", "") +
-        "</section>" +
-        '<section class="glass panel"><h3>Data & Privacy</h3><div class="button-row">' +
-          '<button class="' + (premium ? 'btn' : 'btn-secondary') + '" data-action="export-data">Export JSON</button>' +
-          (!premium ? '<span class="badge">Export format locked</span>' : '') +
-          '<button class="btn-secondary" data-action="clear-cache">Clear Cache</button></div></section>' +
-        '<section class="glass panel"><h3>Health & Device Sync</h3>' +
-          switchRow("Apple Health import available", state.integrations.appleHealth.connected, "toggle-integration", "appleHealth") +
-          switchRow("Hevy import active", state.integrations.hevyImport.connected, "toggle-integration", "hevyImport") +
-        "</section>" +
-      "</div>";
-  }
-
-  function renderPro() {
-    var premium = isPremiumUser();
-    var oneRM = computeBest1RM();
-    var forecast = computeGoalForecast();
-    var aiInsights = computeAIInsights();
-    return '' +
-      '<div class="page-head"><div><p class="eyebrow">FitRank Premium</p>' +
-        '<h2>' + (premium ? 'Premium Active âœ…' : 'Unlock Elite Training Intelligence') + '</h2>' +
-        '<p>' + (premium ? 'All premium features are unlocked for your account.' : 'Premium gives you AI coaching, 1RM tracking, goal forecasting, export tools, animated form guides, and much more.') + '</p>' +
-      '</div></div>' +
-      (premium ? '<div class="success-banner" style="margin-bottom:16px">ðŸ‘‘ Premium is active on this account. All features below are fully unlocked.</div>' : '') +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>1RM Estimator ðŸ‹ï¸</h3><p>Automatically computes your estimated one-rep max using the Epley formula from your best logged sets.</p>' +
-          (premium
-            ? (oneRM.length
-                ? oneRM.map(function (item) {
-                    return '<div class="mini-card"><strong>' + escapeHtml(item.exercise) + '</strong><p>' + item.weight + ' kg Ã— ' + item.reps + ' = <strong>' + item.oneRM + ' kg 1RM</strong></p></div>';
-                  }).join('')
-                : '<p>No sets logged yet. Start tracking lifts to see your 1RM estimates automatically.</p>')
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to see live 1RM estimates for every exercise.</p></div>') +
-        '</section>' +
-        '<section class="glass panel"><h3>Goal Pace Forecast &#x1F3AF;</h3><p>Projects how many weeks until you hit 100% of your weekly training goal at current pace.</p>' +
-          (premium
-            ? '<div class="mini-card"><strong>' + forecast.label + '</strong><p>' + forecast.detail + '</p></div><div style="height:10px"></div><div class="mini-card"><strong>Current pace: ' + forecast.pace + ' sessions/week</strong><p>Goal: 4 sessions/week</p></div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to see your goal timeline forecast.</p></div>') +
-        '</section>' +
-      '</div>' +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>AI Coaching Insights &#x1F916;</h3><p>Rule-based analysis of your training data to suggest your next move.</p>' +
-          (premium
-            ? aiInsights.map(function (insight) {
-                return '<div class="mini-card"><strong>' + escapeHtml(insight.title) + '</strong><p>' + escapeHtml(insight.text) + '</p></div>';
-              }).join('')
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to get AI coaching recommendations tailored to your workout history.</p></div>') +
-        '</section>' +
-        '<section class="glass panel"><h3>Priority Data Export ðŸ“¤</h3><p>Export all your workout history, meals, weight logs, and health data in JSON or CSV format.</p>' +
-          (premium
-            ? '<div class="button-row"><button class="btn" data-action="export-data">Export JSON</button><button class="btn-secondary" data-action="export-csv">Export CSV</button></div><div style="height:12px"></div><div class="mini-card"><strong>Data is yours</strong><p>Full export includes all workouts, sets, meals, weight logs, and imported health data.</p></div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to export your full fitness history.</p></div>') +
-        '</section>' +
-      '</div>' +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>Animated Form Demos &#x1F3A5;</h3><p>For every exercise in your workout, tap Show Form to see an animated coaching guide with cues. Premium-exclusive.</p>' +
-          (premium
-            ? '<div class="success-banner">Active â€” tap â€œShow Formâ€ on any exercise during a workout.</div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to access animated form demos for all 100+ exercises.</p></div>') +
-        '</section>' +
-        '<section class="glass panel"><h3>Hevy Smart Deduplication &#x1F504;</h3><p>When importing Hevy exports, premium users get duplicate detection that prevents double-counting past workouts.</p>' +
-          (premium
-            ? '<div class="success-banner">Active â€” duplicate workouts are automatically skipped on Hevy imports.</div>'
-            : '<div class="mini-card" style="border:1px solid rgba(138,92,255,.4)"><strong>&#x1F512; Premium only</strong><p>Upgrade to enable smart deduplication during Hevy imports.</p></div>') +
-        '</section>' +
-      '</div>' +
-      '<div class="cards-three">' +
-        pricing('Monthly', '$12', 'Best for trying premium first') +
-        pricing('Yearly', '$89', 'Save 38% vs monthly â€” most popular') +
-        pricing('Lifetime', '$249', 'One-time payment, forever access') +
-      '</div>' +
-      (!premium ? '<section class="glass panel" style="margin-top:8px;text-align:center"><h3>How to upgrade</h3><p>Premium plans are assigned by your FitRank admin. Log in as admin (admin@fitrank.app / Admin@123) and use the User Management panel to upgrade any account to premium instantly.</p><div class="badge" style="display:inline-block">Admin-managed upgrades</div></section>' : '');
-  }
-
-  function renderAdmin() {
-    var totalWorkouts = state.workouts.length;
-    var normalUsers = state.users.filter(function (user) { return user.role !== "ADMIN"; });
-    var premiumUsersArr = normalUsers.filter(function (u) { return u.plan === "PRO"; });
-    var freeUsersArr = normalUsers.filter(function (u) { return u.plan !== "PRO"; });
-    var adminAnalytics = buildAdminAnalytics(normalUsers);
-
-    var goalMap = {};
-    normalUsers.forEach(function (user) {
-      var g = user.goal || "General";
-      goalMap[g] = (goalMap[g] || 0) + 1;
-    });
-    var goalKeys = Object.keys(goalMap);
-    var weekBins = [0, 0, 0, 0];
-    var now = Date.now();
-    state.workouts.slice(0, 60).forEach(function (w) {
-      var age = Math.floor((now - new Date(w.createdAt).getTime()) / (7 * 24 * 60 * 60 * 1000));
-      if (age >= 0 && age < 4) weekBins[age] += 1;
-    });
-    weekBins.reverse();
-
-    return '' +
-      '<div class="page-head"><div><p class="eyebrow">Admin Dashboard</p><h2>Platform overview and user management</h2></div></div>' +
-      '<div class="stats-four">' +
-        stat("Total members", String(normalUsers.length), "Registered users") +
-        stat("Premium users", String(premiumUsersArr.length), premiumUsersArr.length ? Math.round((premiumUsersArr.length / Math.max(1, normalUsers.length)) * 100) + "% of users" : "None yet") +
-        stat("Total workouts", String(totalWorkouts), "Logged across all accounts") +
-        stat("Health imports", String(state.integrations.appleHealth.connected ? 1 : 0), "Apple Health connected") +
-      "</div>" +
-      '<div class="cards-two">' +
-        '<section class="glass panel"><h3>User Management</h3>' +
-          (normalUsers.length
-            ? normalUsers.map(function (user) {
-                var planStyle = user.plan === "PRO" ? ' style="color:#8cf0b5"' : "";
-                return '<div class="mini-card">' +
-                  '<strong>' + escapeHtml(user.name) + '</strong>' +
-                  '<p style="margin:3px 0">' + escapeHtml(user.email) + '</p>' +
-                  '<p style="margin:3px 0;font-size:13px">Goal: ' + escapeHtml(user.goal) + '     <span' + planStyle + '>' + escapeHtml(user.plan) + '</span>     Joined ' + formatShortDate(user.createdAt || new Date().toISOString()) + '</p>' +
-                  '<div class="button-row" style="margin-top:10px">' +
-                    '<button class="btn-secondary" data-action="upgrade-user" data-user="' + user.id + '">Upgrade to Premium</button>' +
-                    '<button class="btn-secondary" data-action="downgrade-user" data-user="' + user.id + '">Downgrade to Free</button>' +
-                    '<button class="btn-secondary" data-action="delete-user" data-user="' + user.id + '">Delete</button>' +
-                  '</div>' +
-                '</div>';
-              }).join("")
-            : "<p>No member users found. New signups will appear here.</p>") +
-        "</section>" +
-        '<section class="glass panel"><h3>Platform KPIs</h3>' +
-          metric("Avg workouts / user", normalUsers.length ? (totalWorkouts / normalUsers.length).toFixed(1) : "0") +
-          metric("Total meal logs", String(state.meals.length)) +
-          metric("Total weight entries", String(state.weightLogs.length)) +
-          metric("Hevy imports done", String(state.importPreview.length)) +
-          metric("Active admin", state.admin ? state.admin.email : "None") +
-        "</section>" +
-      '</div>' +
-      '<div class="cards-two">' +
-        '<section class="glass panel chart-card"><h3>Plan Distribution</h3>' +
-          '<div class="chart-box" style="align-items:flex-end;gap:20px">' +
-            '<div style="flex:1;text-align:center">' +
-              '<div class="bar" style="height:' + Math.max(20, Math.round((freeUsersArr.length / Math.max(1, normalUsers.length)) * 180)) + 'px;background:linear-gradient(180deg,#8db0ff,#4f7cff)"></div>' +
-              '<p style="margin-top:8px;font-size:13px">Free<br><strong>' + freeUsersArr.length + '</strong></p>' +
-            '</div>' +
-            '<div style="flex:1;text-align:center">' +
-              '<div class="bar" style="height:' + Math.max(20, Math.round((premiumUsersArr.length / Math.max(1, normalUsers.length)) * 180)) + 'px;background:linear-gradient(180deg,#b050ff,#8a5cff)"></div>' +
-              '<p style="margin-top:8px;font-size:13px">Premium<br><strong>' + premiumUsersArr.length + '</strong></p>' +
-            '</div>' +
-          '</div>' +
-        '</section>' +
-        '<section class="glass panel chart-card"><h3>Weekly Workout Activity (last 4 weeks)</h3>' +
-          '<div class="chart-box">' +
-            weekBins.map(function (val, i) {
-              var labels = ["3w ago", "2w ago", "Last wk", "This wk"];
-              var maxVal = Math.max.apply(null, weekBins.concat([1]));
-              var h = Math.max(12, Math.round((val / maxVal) * 180));
-              return '<div style="flex:1;text-align:center"><div class="bar" style="height:' + h + 'px"></div><p style="font-size:12px;margin-top:6px">' + labels[i] + "<br><strong>" + val + "</strong></p></div>";
-            }).join("") +
-          '</div>' +
-        '</section>' +
-      '</div>' +
-      (goalKeys.length
-        ? '<div class="cards-two">' +
-            '<section class="glass panel chart-card"><h3>Goal Distribution</h3>' +
-              '<div class="chart-box">' +
-                goalKeys.map(function (k) {
-                  var val = goalMap[k];
-                  var maxVal = Math.max.apply(null, goalKeys.map(function (x) { return goalMap[x]; }).concat([1]));
-                  var h = Math.max(12, Math.round((val / maxVal) * 180));
-                  return '<div style="flex:1;text-align:center"><div class="bar" style="height:' + h + 'px"></div><p style="font-size:12px;margin-top:6px">' + escapeHtml(k) + "<br><strong>" + val + "</strong></p></div>";
-                }).join("") +
-              '</div>' +
-            '</section>' +
-            '<section class="glass panel"><h3>Recent Member Snapshot</h3>' +
-              normalUsers.slice(0, 6).map(function (user) {
-                return '<div class="mini-card"><strong>' + escapeHtml(user.name) + '</strong><p>' + escapeHtml(user.email) + '     ' + escapeHtml(user.plan) + '     ' + escapeHtml(user.goal) + '</p></div>';
-              }).join("") +
-            '</section>' +
-          '</div>'
-        : '');
-  }
-
-  function renderMobileNav() {
-    var items = state.admin
-      ? [["admin", "📈 Admin"]]
-      : [
-          ["dashboard",    "🏠 Home"],
-          ["workouts",     "💪 Train"],
-          ["progress",     "📈 Charts"],
-          ["integrations", "📥 Import"],
-          ["settings",     "⚙️ More"]
-        ];
-
-    return '<div class="glass mobile-nav"><div class="mobile-nav-inner ' + (state.admin ? "admin-nav" : "") + '">' + items.map(function (item) {
-      return '<button class="' + (state.page === item[0] ? "active" : "") + '" data-nav="' + item[0] + '">' + item[1] + '</button>';
-    }).join("") + "</div></div>";
-  }
-
-  function field(label, inner) {
-    return '<div class="field"><label>' + label + '</label><div class="field-shell">' + inner + "</div></div>";
-  }
-
-  function button(label, page, primary) {
-    return '<button class="' + (primary ? "btn" : "btn-secondary") + '" data-nav="' + page + '">' + label + "</button>";
-  }
-
-  function stat(label, value, helper) {
-    return '<div class="glass panel stat-card"><span>' + label + "</span><strong>" + value + "</strong><p>" + helper + "</p></div>";
-  }
-
-  function metric(label, value) {
-    return '<div class="mini-card"><strong>' + value + "</strong><p>" + label + "</p></div>";
-  }
-
-  function ring(label, value) {
-    var numeric = Math.min(100, Number(value) || 0);
-    var angle = numeric * 3.6;
-    return '<div class="ring"><div class="ring-visual" style="background:conic-gradient(#8a5cff ' + angle + 'deg, rgba(255,255,255,.08) ' + angle + 'deg)"><div class="ring-center">' + numeric + '%</div></div><strong>' + label + "</strong></div>";
-  }
-
-  function pricing(title, price, helper) {
-    return '<section class="glass panel"><p class="eyebrow">' + title + "</p><h2>" + price + "</h2><p>" + helper + '</p><div class="badge">Admin assignment only</div></section>';
-  }
-
-  function chartCard(title, content) {
-    return '<section class="glass panel chart-card"><h3>' + title + "</h3>" + content + "</section>";
-  }
-
-  function renderBars(data) {
-    var vals = data.values || data;
-    if (!vals.length || !hasPositive(vals)) return "<p>No data yet. Save workouts to build this chart.</p>";
-    var max = Math.max.apply(null, vals) || 1;
-    return '<div class="chart-box" style="align-items:flex-end;gap:12px;margin-top:20px;">' + vals.map(function (value, i) {
-      var lbl = data.labels && data.labels[i] ? String(data.labels[i]).slice(5) : "";
-      var h = Math.max(12, Math.round((value / max) * 180));
-      return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;">' +
-        '<span style="font-size:10px;color:rgba(255,255,255,0.6);margin-bottom:4px;">' + Math.round(value) + '</span>' +
-        '<div class="bar" style="height:' + h + 'px;width:100%;border-radius:6px;background:linear-gradient(180deg,#8db0ff,#8a5cff 65%,#b050ff);"></div>' +
-        (lbl ? '<span style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:4px;white-space:nowrap;transform:rotate(-45deg);transform-origin:left center;">' + escapeHtml(lbl) + '</span>' : '') +
-        '</div>';
-    }).join("") + "</div>";
-  }
-
-  function renderLineChart(data) {
-    if (!data.values.length || !hasPositive(data.values)) return "<p>No data yet. Save workouts to build this chart.</p>";
-    var width = 520;
-    var height = 220;
-    var chartH = height - 30; // Leave room for labels
-    var max = Math.max.apply(null, data.values) || 1;
-    var points = [];
-    var labelsSvg = "";
-    
-    for (var i = 0; i < data.values.length; i += 1) {
-      var x = data.values.length === 1 ? width / 2 : 20 + (i * ((width - 40) / (data.values.length - 1)));
-      var y = chartH - 20 - ((data.values[i] / max) * (chartH - 40));
-      points.push(x + "," + y);
-      labelsSvg += '<text x="' + x + '" y="' + (y - 12) + '" fill="rgba(255,255,255,0.8)" font-size="10" text-anchor="middle">' + Math.round(data.values[i]*10)/10 + '</text>';
-      
-      if (data.labels && data.labels[i] && (data.labels.length <= 8 || i % Math.ceil(data.labels.length/6) === 0 || i === data.values.length - 1)) {
-        var labelText = String(data.labels[i]).slice(5); // Show MM-DD roughly if YYYY-MM-DD
-        labelsSvg += '<text x="' + x + '" y="' + (height - 5) + '" fill="rgba(255,255,255,.45)" font-size="11" text-anchor="middle">' + escapeHtml(labelText) + '</text>';
+  /** Best set per exercise that beat every earlier e1RM within the window, newest first. */
+  function recentRecords(days) {
+    const best = {}, found = {};
+    for (const w of state.workouts.slice().reverse()) {
+      for (const s of w.sets) {
+        const e = e1rm(s.weight, s.reps);
+        if (!e) continue;
+        if (best[s.exercise] && e > best[s.exercise] + 0.01 && ts(w) > Date.now() - days * DAY) found[s.exercise] = { ...s, e1: e, t: ts(w) };
+        best[s.exercise] = Math.max(best[s.exercise] || 0, e);
       }
     }
-    return '<div class="line-chart"><svg class="line-svg" viewBox="0 0 ' + width + " " + height + '" preserveAspectRatio="none"><polyline fill="none" stroke="#8db0ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="' + points.join(" ") + '"></polyline>' +
-      points.map(function (point) {
-        var xy = point.split(",");
-        return '<circle cx="' + xy[0] + '" cy="' + xy[1] + '" r="5" fill="#b050ff"></circle>';
-      }).join("") + labelsSvg +
-      "</svg></div>";
+    return Object.values(found).sort(by(p => p.t));
   }
 
-  function select(name, value, options) {
-    return '<div class="field-shell"><select data-select="' + name + '">' + options.map(function (option) {
-      return '<option value="' + escapeAttr(option) + '" ' + (option === value ? "selected" : "") + ">" + option + "</option>";
-    }).join("") + "</select></div>";
+  function groupSets(sets) {
+    const map = new Map();
+    for (const s of sets) { if (!map.has(s.exercise)) map.set(s.exercise, []); map.get(s.exercise).push(s); }
+    return [...map].map(([name, list]) => ({ name, sets: list, best: list.reduce((b, s) => (e1rm(s.weight, s.reps) > e1rm(b.weight, b.reps) ? s : b), list[0]) }));
   }
 
-  function switchRow(label, on, action, key) {
-    return '<div class="switch"><span>' + label + '</span><button class="' + (on ? "on" : "off") + '" data-action="' + action + '" data-key="' + key + '">' + (on ? "On" : "Off") + "</button></div>";
+  function workoutSummary(w) {
+    const ex = groupSets(w.sets);
+    return h`<div class="summary">
+      <div class="summary-top"><b>${w.title}</b><span class="muted">${ago(ts(w))} · ${fmtTime(ts(w))}</span></div>
+      <div class="stat-row">
+        <div><span class="muted">Duration</span><b>${w.durationMinutes ? w.durationMinutes + " min" : "–"}</b></div>
+        <div><span class="muted">Volume</span><b>${fmtVol(vol(w))} ${unit()}</b></div>
+        <div><span class="muted">Sets</span><b>${w.sets.length}</b></div>
+      </div>
+      <ul class="ex-lines">${ex.slice(0, 5).map(e => h`<li><span>${e.name}</span><span class="muted">${e.sets.length} ${e.sets.length === 1 ? "set" : "sets"} · best ${fmtW(e.best.weight)} × ${e.best.reps}</span></li>`)}
+      ${ex.length > 5 ? h`<li class="muted">+${ex.length - 5} more</li>` : ""}</ul>
+    </div>`;
   }
 
-  function renderModal() {
-    if (!state.modal) return "";
-    if (state.modal.type === "exercise-picker") {
-      return renderExercisePicker();
+  // live logger
+  function previousSets(name) {
+    for (const w of state.workouts) { const s = w.sets.filter(x => x.exercise === name); if (s.length) return s; }
+    return [];
+  }
+  const bestE1 = name => Math.max(0, ...state.workouts.flatMap(w => w.sets.filter(s => s.exercise === name).map(s => e1rm(s.weight, s.reps))));
+  const liveDone = () => state.live.exercises.flatMap(x => x.sets.filter(s => s.done).map(s => ({ exercise: x.name, weight: fromU(+s.weight || 0), reps: +s.reps || 0 })));
+
+  function logPage() {
+    if (!state.live) {
+      const rs = settings().routines || [];
+      return h`
+        <section class="card start-card" style="--i:0">
+          <h1>Ready when you are</h1>
+          <p class="muted">Start empty and add exercises as you go, or run one of your routines.</p>
+          <button class="btn primary big" data-act="start">${icon("plus", 18)}Start empty workout</button>
+        </section>
+        ${rs.length ? h`<section class="card" style="--i:1"><header class="card-head"><h2>Routines</h2><a class="link" href="#/routines">Manage</a></header>
+          <div class="routine-list">${rs.map(r => h`<button class="routine-pick" data-act="start" data-routine="${r.id}"><b>${r.name}</b><span class="muted">${r.exercises.length} exercises</span>${icon("play", 16)}</button>`)}</div></section>` : ""}`;
     }
-    if (state.modal.type === "form-demo") {
-      return renderFormDemoModal();
+    const L = state.live, done = liveDone();
+    return h`
+      <header class="card log-head" style="--i:0">
+        <input class="title-input" data-bind="title" value="${L.title}" aria-label="Workout name" maxlength="160">
+        <button class="btn primary" data-act="finish">${icon("check", 16)}Finish</button>
+        <div class="stat-row log-meta">
+          <div><span class="muted">Duration</span><b id="live-clock">${clock((Date.now() - L.startedAt) / 1000)}</b></div>
+          <div><span class="muted">Volume</span><b>${fmtVol(sum(done, s => s.weight * s.reps))} <small>${unit()}</small></b></div>
+          <div><span class="muted">Sets</span><b>${done.length}</b></div>
+        </div>
+      </header>
+      ${L.exercises.length ? L.exercises.map(exerciseCard) : h`<section class="card" style="--i:1">${empty("log", "No exercises yet", "Add the first one to start logging sets.")}</section>`}
+      <button class="btn wide" data-act="pick" style="--i:2">${icon("plus", 18)}Add exercise</button>
+      <div class="danger-zone">${armedBtn("discard", "discard", "Discard workout")}</div>`;
+  }
+
+  function exerciseCard(x, xi) {
+    const prev = previousSets(x.name);
+    const u = unit();
+    return h`<section class="card exercise" style="--i:${xi + 1}" data-ex="${x.id}">
+      <header class="card-head">
+        <div><h2>${x.name}</h2><span class="muted">${groupOf(x.name)}${prev.length ? "" : " · first time"}</span></div>
+        <button class="icon-btn" data-act="sheet" data-sheet="exercise" data-ex="${x.id}" aria-label="Options for ${x.name}">${icon("menu")}</button>
+      </header>
+      <div class="sets">
+        <div class="set head"><span>Set</span><span>Previous</span><span>${u}</span><span>Reps</span><span class="sr">Done</span></div>
+        ${x.sets.map((s, i) => {
+          const p = prev[i];
+          const flash = state.flash && state.flash.set === s.id;
+          return h`<div class="set${s.done ? " done" : ""}${flash ? " just-done" : ""}" data-set="${s.id}">
+            <span class="n">${i + 1}</span>
+            <span class="prev">${p ? `${fmtW(p.weight)} × ${p.reps}` : "–"}</span>
+            <input inputmode="decimal" data-bind="weight" value="${s.weight}" placeholder="${p ? n1(toU(p.weight)) : "–"}" aria-label="${x.name} set ${i + 1} weight in ${u}">
+            <input inputmode="numeric" data-bind="reps" value="${s.reps}" placeholder="${p ? p.reps : "–"}" aria-label="${x.name} set ${i + 1} reps">
+            <button class="tick" data-act="tick" aria-pressed="${!!s.done}" aria-label="Mark ${x.name} set ${i + 1} done">${icon("check", 18)}</button>
+            ${flash && state.flash.pr ? h`<span class="pr-badge" role="status">PR</span><span class="burst" aria-hidden="true">${Array.from({ length: 10 }, (_, k) => h`<i style="--a:${k * 36}deg"></i>`)}</span>` : ""}
+          </div>`;
+        })}
+      </div>
+      <button class="btn ghost" data-act="add-set">${icon("plus", 16)}Add set</button>
+    </section>`;
+  }
+
+  function historyPage() {
+    if (!state.workouts.length) return h`<h1 class="page-title">History</h1><section class="card">${empty("history", "No workouts yet", "Finished workouts and Hevy imports show up here.", h`<a class="btn" href="#/import">${icon("import", 16)}Import history</a>`)}</section>`;
+    const months = new Map();
+    state.workouts.forEach(w => { const k = fmtDate(ts(w), { month: "long", year: "numeric" }); if (!months.has(k)) months.set(k, []); months.get(k).push(w); });
+    let i = 0;
+    return h`<h1 class="page-title">History</h1>
+      ${[...months].map(([month, list]) => h`<section class="month">
+        <h2 class="month-title">${month}<span class="muted">${list.length} workouts · ${fmtVol(sum(list, vol))} ${unit()}</span></h2>
+        ${list.map(w => h`<article class="card workout" style="--i:${Math.min(i++, 8)}">
+          ${workoutSummary(w)}
+          <details><summary>All ${w.sets.length} sets</summary>
+            ${groupSets(w.sets).map(e => h`<div class="detail-ex"><b>${e.name}</b><ol>${e.sets.map(s => h`<li>${fmtW(s.weight)} ${unit()} × ${s.reps}</li>`)}</ol></div>`)}
+          </details>
+          <div class="row-actions">
+            <button class="btn ghost" data-act="repeat" data-id="${w.id}">${icon("repeat", 16)}Repeat</button>
+            <button class="btn ghost" data-act="sheet" data-sheet="rename" data-id="${w.id}">${icon("edit", 16)}Rename</button>
+            <span class="spacer"></span>
+            ${armedBtn("w" + w.id, "delete-workout", "Delete", `data-id="${w.id}"`)}
+          </div>
+        </article>`)}
+      </section>`)}`;
+  }
+
+  function progress() {
+    const ranges = { "4w": 4, "12w": 12, "1y": 52, all: 0 };
+    const weeks = ranges[state.range];
+    const from = weeks ? thisWeek() - (weeks - 1) * WEEK : 0;
+    const ws = inRange(state.workouts, from).reverse();
+    const freq = {};
+    state.workouts.forEach(w => w.sets.forEach(s => { if (e1rm(s.weight, s.reps)) freq[s.exercise] = (freq[s.exercise] || 0) + 1; }));
+    const lifts = Object.keys(freq).sort(by(k => freq[k]));
+    const ex = lifts.includes(state.exercise) ? state.exercise : lifts[0];
+    const strength = ws.map(w => ({ t: ts(w), v: Math.max(0, ...w.sets.filter(s => s.exercise === ex).map(s => e1rm(s.weight, s.reps))) }))
+      .filter(p => p.v).map(p => ({ ...p, label: fmtDate(p.t, { month: "short", day: "numeric" }) }));
+    const bw = inRange(state.weights, from).reverse().map(w => ({ t: ts(w), v: w.kg, label: fmtDate(ts(w), { month: "short", day: "numeric" }) }));
+    const groups = {};
+    ws.forEach(w => w.sets.forEach(s => { const g = groupOf(s.exercise); groups[g] = (groups[g] || 0) + 1; }));
+    const gmax = Math.max(1, ...Object.values(groups));
+    const prs = lifts.slice(0, 8).map(name => {
+      let best = null;
+      state.workouts.forEach(w => w.sets.forEach(s => { if (s.exercise === name && (!best || e1rm(s.weight, s.reps) > best.e1)) best = { ...s, e1: e1rm(s.weight, s.reps), t: ts(w) }; }));
+      return best;
+    }).filter(Boolean).sort(by(p => p.e1));
+    const weekCount = weeks || Math.max(1, Math.ceil((Date.now() - Math.min(...state.workouts.map(ts), Date.now())) / WEEK));
+    return h`
+      <div class="page-head">
+        <h1 class="page-title">Progress</h1>
+        <div class="seg" role="group" aria-label="Range">${Object.keys(ranges).map(k => h`<button data-act="range" data-range="${k}" aria-pressed="${state.range === k}">${k === "all" ? "All" : k.toUpperCase()}</button>`)}</div>
+      </div>
+      <div class="grid two">
+        <section class="card" style="--i:0">
+          <header class="card-head"><h2>Estimated 1RM</h2>
+            ${lifts.length ? h`<select data-change="exercise" aria-label="Exercise">${lifts.slice(0, 40).map(n => h`<option ${n === ex ? "selected" : ""}>${n}</option>`)}</select>` : ""}
+          </header>
+          ${lifts.length ? line(strength, v => fmtW(v) + " " + unit(), { id: "e1", label: ex + " estimated 1RM" }) : empty("progress", "No lifts yet", "Sets of 12 reps or fewer feed the strength chart.")}
+        </section>
+        <section class="card" style="--i:1">
+          <header class="card-head"><h2>Volume per week</h2><span class="muted">${unit()}</span></header>
+          ${bars(weekly(Math.min(weekCount, 52)), fmtVol, { label: "Weekly volume" })}
+        </section>
+        <section class="card" style="--i:2">
+          <header class="card-head"><h2>Body weight</h2>${state.weights[0] ? h`<span class="muted">Latest ${fmtW(state.weights[0].kg)} ${unit()}</span>` : ""}</header>
+          ${line(bw, v => fmtW(v) + " " + unit(), { id: "bw", icon: "scale", label: "Body weight", emptyTitle: "Log your weight", emptyText: "Two weigh-ins draw the trend." })}
+          <form class="inline-form" data-form="weight">
+            <label class="field"><span>Weight (${unit()})</span><input name="kg" inputmode="decimal" required placeholder="${state.weights[0] ? n1(toU(state.weights[0].kg)) : "75"}"></label>
+            <button class="btn">${icon("plus", 16)}Log</button>
+          </form>
+        </section>
+        <section class="card" style="--i:3">
+          <header class="card-head"><h2>Sets per muscle group</h2><span class="muted">${weeks ? `Last ${weeks} weeks` : "All time"}</span></header>
+          ${Object.keys(groups).length ? h`<ul class="hbars">${GROUPS.filter(g => groups[g]).sort(by(g => groups[g])).map((g, i) => h`<li style="--i:${i}"><span>${g}</span><span class="hbar"><i style="--w:${(groups[g] / gmax) * 100}%"></i></span><b>${groups[g]}</b></li>`)}</ul>`
+            : empty("activity", "No sets in this range", "Pick a longer range or log a workout.")}
+        </section>
+      </div>
+      <section class="card" style="--i:4">
+        <header class="card-head"><h2>Personal records</h2><span class="muted">Best estimated 1RM per lift</span></header>
+        ${prs.length ? h`<div class="table-wrap"><table class="table">
+          <thead><tr><th>Exercise</th><th>Best set</th><th class="r">e1RM</th><th class="r">Date</th></tr></thead>
+          <tbody>${prs.map(p => h`<tr><td>${p.exercise}</td><td>${fmtW(p.weight)} ${unit()} × ${p.reps}</td><td class="r"><b>${fmtW(p.e1)}</b></td><td class="r muted">${fmtDate(p.t, { month: "short", day: "numeric", year: "2-digit" })}</td></tr>`)}</tbody>
+        </table></div>` : empty("trophy", "No records yet", "Log a few workouts to fill this table.")}
+      </section>`;
+  }
+
+  function routines() {
+    const rs = settings().routines || [];
+    return h`<div class="page-head"><h1 class="page-title">Routines</h1><button class="btn primary" data-act="sheet" data-sheet="routine">${icon("plus", 16)}New routine</button></div>
+      ${rs.length ? h`<div class="grid two">${rs.map((r, i) => {
+        const lastDone = state.workouts.find(w => w.title === r.name);
+        return h`<article class="card routine" style="--i:${i}">
+          <header class="card-head"><div><h2>${r.name}</h2><span class="muted">${lastDone ? "Last done " + agoLower(ts(lastDone)) : "Not done yet"}</span></div></header>
+          <ul class="chips">${r.exercises.map(e => h`<li>${e}</li>`)}</ul>
+          <div class="row-actions">
+            <button class="btn primary" data-act="start" data-routine="${r.id}">${icon("play", 16)}Start</button>
+            <button class="btn ghost" data-act="sheet" data-sheet="routine" data-id="${r.id}">${icon("edit", 16)}Edit</button>
+            <span class="spacer"></span>
+            ${armedBtn("r" + r.id, "delete-routine", "Delete", `data-id="${r.id}"`)}
+          </div>
+        </article>`;
+      })}</div>` : h`<section class="card">${empty("routines", "No routines yet", "Save a workout as a routine, or build one here.")}</section>`}`;
+  }
+
+  function nutrition() {
+    const s = settings(), today = state.meals.filter(m => dayKey(ts(m)) === dayKey(Date.now()));
+    const kcal = sum(today, m => m.calories), protein = sum(today, m => m.protein), water = sum(today, m => m.water);
+    const days = Array.from({ length: 7 }, (_, i) => { const t = Date.now() - (6 - i) * DAY; return { label: fmtDate(t, { weekday: "short" }), value: sum(state.meals.filter(m => dayKey(ts(m)) === dayKey(t)), m => m.calories) }; });
+    return h`<h1 class="page-title">Nutrition</h1>
+      <section class="card dials" style="--i:0" aria-label="Today">
+        ${dial("Calories", (kcal / (s.kcal || 2400)) * 100, count(kcal), `of ${(s.kcal || 2400).toLocaleString()} kcal`, "warm")}
+        ${dial("Protein", (protein / (s.protein || 160)) * 100, h`${count(protein)}<small>g</small>`, `of ${s.protein || 160} g`, "accent")}
+        ${dial("Water", (water / (s.water || 3)) * 100, h`${count(water, "1")}<small>L</small>`, `of ${s.water || 3} L`, "good")}
+      </section>
+      <div class="grid two">
+        <section class="card" style="--i:1">
+          <header class="card-head"><h2>Log a meal</h2></header>
+          <form class="form" data-form="meal">
+            <label class="field"><span>What you ate</span><input name="name" required maxlength="160" placeholder="Chicken rice bowl"></label>
+            <div class="form-row">
+              <label class="field"><span>Calories</span><input name="calories" inputmode="numeric" required placeholder="650"></label>
+              <label class="field"><span>Protein (g)</span><input name="protein" inputmode="decimal" placeholder="42"></label>
+              <label class="field"><span>Water (L)</span><input name="water" inputmode="decimal" placeholder="0.5"></label>
+            </div>
+            <button class="btn primary">${icon("plus", 16)}Save meal</button>
+          </form>
+        </section>
+        <section class="card" style="--i:2">
+          <header class="card-head"><h2>Today</h2><span class="muted">${today.length} meals</span></header>
+          ${today.length ? h`<ul class="list">${today.map(m => h`<li><div><b>${m.name}</b><span class="muted">${fmtTime(ts(m))} · ${m.protein} g protein${m.water ? ` · ${m.water} L` : ""}</span></div><b class="num">${m.calories}</b>
+            <button class="icon-btn" data-act="delete-meal" data-id="${m.id}" aria-label="Delete ${m.name}">${icon("trash", 18)}</button></li>`)}</ul>`
+            : empty("food", "Nothing logged today", "Meals you log show up here.")}
+        </section>
+      </div>
+      <section class="card" style="--i:3"><header class="card-head"><h2>Last 7 days</h2><span class="muted">kcal</span></header>
+        ${bars(days, v => Math.round(v).toLocaleString() + " kcal", { label: "Calories per day", emptyTitle: "No meals this week", emptyText: "Daily calories chart once you log meals." })}</section>`;
+  }
+
+  function importPage() {
+    const p = state.preview, im = state.importing, hl = settings().health;
+    return h`<h1 class="page-title">Import</h1>
+      <div class="grid two">
+        <section class="card" style="--i:0">
+          <header class="card-head"><h2>Hevy</h2></header>
+          <p class="muted">In Hevy, open Settings › Export data and download your workouts CSV. FitRank's own JSON export also works here.</p>
+          <label class="btn primary file">${icon("import", 16)}Choose CSV or JSON<input type="file" accept=".csv,.json,text/csv,application/json" data-file="hevy"></label>
+        </section>
+        <section class="card" style="--i:1">
+          <header class="card-head"><h2>Apple Health</h2></header>
+          <p class="muted">On iPhone: Health › your profile › Export All Health Data. Unzip it and choose <code>export.xml</code>. It's read in this browser in chunks, so large files are fine.</p>
+          <label class="btn primary file">${icon("heart", 16)}Choose export.xml<input type="file" accept=".xml,text/xml" data-file="health"></label>
+        </section>
+      </div>
+      ${im ? h`<section class="card" aria-live="polite"><header class="card-head"><h2>${im.label}</h2><span class="muted" id="import-count">${im.done} / ${im.total}</span></header>
+        <div class="progress"><i id="import-bar" style="--w:${im.total ? (im.done / im.total) * 100 : 0}%"></i></div></section>` : ""}
+      ${p && !im ? h`<section class="card preview" style="--i:2">
+        <header class="card-head"><h2>Ready to import</h2><span class="muted">${p.file}</span></header>
+        <div class="stat-row">
+          ${p.workouts ? h`<div><span class="muted">New workouts</span><b>${p.workouts.length}</b></div>` : ""}
+          ${p.weights ? h`<div><span class="muted">Weigh-ins</span><b>${p.weights.length}</b></div>` : ""}
+          ${p.skipped ? h`<div><span class="muted">Already here</span><b>${p.skipped}</b></div>` : ""}
+          ${p.health ? h`<div><span class="muted">Avg daily steps</span><b>${p.health.steps.toLocaleString()}</b></div><div><span class="muted">Resting HR</span><b>${p.health.restingHr || "–"}</b></div>` : ""}
+        </div>
+        ${p.range ? h`<p class="muted">${p.range}</p>` : ""}
+        <div class="row-actions"><button class="btn primary" data-act="import-go">${icon("check", 16)}Import</button><button class="btn ghost" data-act="import-cancel">Cancel</button></div>
+      </section>` : ""}
+      ${hl ? h`<section class="card" style="--i:3"><header class="card-head"><h2>Apple Health summary</h2><span class="muted">Imported ${agoLower(Date.parse(hl.importedAt))} · last 30 days</span></header>
+        <div class="stat-row">
+          <div><span class="muted">Avg daily steps</span><b>${hl.steps.toLocaleString()}</b></div>
+          <div><span class="muted">Active energy / day</span><b>${hl.activeKcal.toLocaleString()} kcal</b></div>
+          <div><span class="muted">Resting heart rate</span><b>${hl.restingHr ? hl.restingHr + " bpm" : "–"}</b></div>
+        </div></section>` : ""}`;
+  }
+
+  function insights() {
+    if (!premium()) {
+      return h`<h1 class="page-title">Insights</h1><section class="card locked" style="--i:0">${icon("lock", 28)}
+        <h2>Insights are part of Premium</h2>
+        <ul class="ticks"><li>Strength board: every lift's e1RM against 4 weeks ago</li><li>Consistency pace against your weekly target</li><li>Coaching notes from your own logged sets</li><li>Form cues for every exercise in the logger</li></ul>
+        <p class="muted">Premium is assigned by your FitRank admin. Your data and exports stay available on every plan.</p></section>`;
     }
-    return "";
+    const board = Object.entries(state.workouts.reduce((acc, w) => { w.sets.forEach(s => { acc[s.exercise] = (acc[s.exercise] || 0) + 1; }); return acc; }, {}))
+      .sort(by(e => e[1])).slice(0, 6).map(([name]) => {
+        const now = bestBefore(name, Infinity), then = bestBefore(name, Date.now() - 4 * WEEK);
+        return { name, now, delta: then ? ((now - then) / then) * 100 : null };
+      }).filter(b => b.now);
+    const last4 = inRange(state.workouts, thisWeek() - 4 * WEEK, thisWeek()).length / 4;
+    const target = settings().target || 4;
+    return h`<h1 class="page-title">Insights</h1>
+      <div class="grid two">
+        <section class="card" style="--i:0"><header class="card-head"><h2>Strength board</h2><span class="muted">e1RM · vs 4 weeks ago</span></header>
+          ${board.length ? h`<ul class="list">${board.map(b => h`<li><div><b>${b.name}</b></div><b class="num">${fmtW(b.now)} ${unit()}</b>
+            <span class="delta ${b.delta > 0.5 ? "up" : b.delta < -0.5 ? "down" : ""}">${b.delta == null ? "new" : (b.delta > 0 ? "+" : "") + b.delta.toFixed(1) + "%"}</span></li>`)}</ul>`
+            : empty("trophy", "No lifts yet", "Log some sets first.")}
+        </section>
+        <section class="card" style="--i:1"><header class="card-head"><h2>Consistency</h2></header>
+          <div class="big-stat">${count(last4, "1")}<span>sessions a week</span></div>
+          <p class="muted">Average over the last 4 full weeks, against your target of ${target}. ${last4 >= target ? "You're on pace." : last4 ? `Adding ${Math.ceil((target - last4) * 4)} sessions over the next 4 weeks gets you there.` : "Log a workout to start the count."}</p>
+        </section>
+      </div>
+      <section class="card" style="--i:2"><header class="card-head"><h2>Coaching notes</h2><span class="muted">Rules applied to your logged sets</span></header>
+        <ul class="notes">${coachingNotes().map(n => h`<li class="${n.tone}">${icon(n.icon, 18)}<div><b>${n.title}</b><span class="muted">${n.text}</span></div></li>`)}</ul>
+      </section>`;
   }
 
-  function renderExercisePicker() {
-    var query = String(state.modal.query || "").toLowerCase();
-    var results = EXERCISE_LIBRARY.filter(function (exercise) {
-      if (!query) return true;
-      return exercise.name.toLowerCase().indexOf(query) > -1 ||
-        exercise.category.toLowerCase().indexOf(query) > -1 ||
-        exercise.primaryMuscle.toLowerCase().indexOf(query) > -1;
-    }).slice(0, 100);
+  const bestBefore = (name, t) => Math.max(0, ...state.workouts.filter(w => ts(w) < t).flatMap(w => w.sets.filter(s => s.exercise === name).map(s => e1rm(s.weight, s.reps))));
 
-    return '' +
-      '<div class="modal-backdrop" data-action="close-modal">' +
-        '<div class="glass modal-card" data-modal-card="true">' +
-          '<div class="page-head"><div><p class="eyebrow">Exercise Library</p><h2>Choose from 100+ exercises</h2><p>Search by name, muscle group, or equipment.</p></div><button class="btn-secondary" data-action="close-modal">Close</button></div>' +
-          field("Search", '<input data-input="exercise-search" value="' + escapeAttr(state.modal.query || "") + '" placeholder="Bench, squat, biceps, dumbbell...">') +
-          '<div class="exercise-picker-grid">' +
-            results.map(function (exercise) {
-              return '<button class="exercise-option" data-action="select-exercise" data-name="' + escapeAttr(exercise.name) + '"><strong>' + escapeHtml(exercise.name) + '</strong><span>' + escapeHtml(exercise.category) + " &bull; " + escapeHtml(exercise.primaryMuscle) + " &bull; " + escapeHtml(exercise.equipment) + '</span></button>';
-            }).join("") +
-          '</div>' +
-        '</div>' +
-      '</div>';
-  }
-
-  function renderFormDemoModal() {
-    var exercise = findExerciseById(state.modal.exerciseId);
-    var meta = exerciseMeta(exercise ? exercise.name : state.modal.exerciseName);
-    var premium = requirePremiumStatusText();
-    return '' +
-      '<div class="modal-backdrop" data-action="close-modal">' +
-        '<div class="glass modal-card modal-wide" data-modal-card="true">' +
-          '<div class="page-head"><div><p class="eyebrow">Exercise Form</p><h2>' + escapeHtml(meta.name) + '</h2><p>' + escapeHtml(meta.category) + "   " + escapeHtml(meta.primaryMuscle) + "   " + escapeHtml(meta.equipment) + '</p></div><button class="btn-secondary" data-action="close-modal">Close</button></div>' +
-          (premium.allowed
-            ? '<div class="cards-two"><section class="glass panel"><div class="form-demo ' + escapeAttr(meta.demoType) + '"><div class="demo-stage"><div class="demo-body"></div><div class="demo-limb limb-a"></div><div class="demo-limb limb-b"></div><div class="demo-bar"></div></div></div><p class="demo-label">Animated premium form demo</p></section><section class="glass panel"><h3>Coaching Cues</h3><div class="pill-row">' + meta.cues.map(function (cue) { return '<span>' + escapeHtml(cue) + '</span>'; }).join("") + '</div><div style="height:16px"></div><div class="mini-card"><strong>Primary focus</strong><p>' + escapeHtml(meta.primaryMuscle) + '</p></div><div class="mini-card"><strong>Equipment</strong><p>' + escapeHtml(meta.equipment) + '</p></div></section></div>'
-            : '<section class="glass panel"><h3>Premium feature</h3><p>' + escapeHtml(premium.message) + '</p><div class="badge">Ask admin to upgrade this account</div></section>') +
-        '</div>' +
-      '</div>';
-  }
-
-  function handleClick(event) {
-    var nav = event.target.closest("[data-nav]");
-    if (nav) {
-      var navDest = nav.getAttribute("data-nav");
-      if (navDest === "workouts") {
-        state.liveWorkout = loadLiveWorkout();
+  function coachingNotes() {
+    const notes = [], wk = thisWeek();
+    const avg = sum(inRange(state.workouts, wk - 4 * WEEK, wk), vol) / 4, now = sum(inRange(state.workouts, wk), vol);
+    if (avg && now > avg * 1.3) notes.push({ tone: "warn", icon: "flame", title: `Load is ${Math.round((now / avg - 1) * 100)}% above your 4-week average`, text: "Big jumps are where aches start. Keep the next session moderate." });
+    const recent = inRange(state.workouts, Date.now() - 14 * DAY);
+    if (state.workouts.length >= 4) {
+      ["Chest", "Back", "Legs", "Shoulders"].filter(g => !recent.some(w => w.sets.some(s => groupOf(s.exercise) === g)))
+        .forEach(g => notes.push({ tone: "info", icon: "activity", title: `No ${g.toLowerCase()} sets in 14 days`, text: "Plan it into your next session to keep things balanced." }));
+    }
+    const top = Object.entries(state.workouts.reduce((a, w) => { w.sets.forEach(s => { if (e1rm(s.weight, s.reps)) a[s.exercise] = (a[s.exercise] || 0) + 1; }); return a; }, {})).sort(by(e => e[1]))[0];
+    if (top) {
+      const sessions = state.workouts.filter(w => ts(w) > Date.now() - 6 * WEEK && w.sets.some(s => s.exercise === top[0])).length;
+      if (sessions >= 3 && bestBefore(top[0], Infinity) <= bestBefore(top[0], Date.now() - 6 * WEEK)) {
+        notes.push({ tone: "info", icon: "progress", title: `${top[0]} hasn't set a new e1RM in 6 weeks`, text: "Try a different rep range for a few weeks, e.g. 3×5 heavier or 3×10 lighter." });
       }
-      setPage(navDest);
-      return;
     }
-
-    var actionNode = event.target.closest("[data-action]");
-    if (!actionNode) return;
-
-    var action = actionNode.getAttribute("data-action");
-    var key = actionNode.getAttribute("data-key");
-    var exerciseId = actionNode.getAttribute("data-exercise");
-    var setId = actionNode.getAttribute("data-set");
-    var routineId = actionNode.getAttribute("data-routine");
-
-    if (action === "toggle-auth") {
-      state.authMode = state.authMode === "login" ? "signup" : "login";
-      setPage(state.authMode);
-      state.authError = "";
-      state.authInfo = "";
-      render();
-    } else if (action === "back-to-login") {
-      clearResetUrl();
-      state.authMode = "login";
-      state.authError = "";
-      state.authInfo = "";
-      state.pendingReset = { email: "", password: "", confirm: "", token: "" };
-      render();
-    } else if (action === "toggle-password") {
-      state.showPassword = !state.showPassword;
-      render();
-    } else if (action === "remember-me") {
-      state.rememberMe = !state.rememberMe;
-      render();
-    } else if (action === "forgot") {
-      requestPasswordReset(readAuthEmail());
-    } else if (action === "logout") {
-      state.user = null;
-      state.admin = null;
-      loadUserData(null);
-      setPage("login");
-      state.authMode = "login";
-      render();
-    } else if (action === "finish-workout") {
-      finishWorkout();
-    } else if (action === "add-exercise") {
-      openExercisePicker("add");
-    } else if (action === "delete-exercise") {
-      deleteExercise(exerciseId);
-    } else if (action === "move-up") {
-      moveExercise(exerciseId, -1);
-    } else if (action === "move-down") {
-      moveExercise(exerciseId, 1);
-    } else if (action === "toggle-set") {
-      toggleSet(exerciseId, setId);
-    } else if (action === "add-set") {
-      addSet(exerciseId);
-    } else if (action === "replace-exercise") {
-      openExercisePicker("replace", exerciseId);
-    } else if (action === "show-form") {
-      openFormDemo(exerciseId);
-    } else if (action === "exercise-notes") {
-      toast("Exercise notes opened.");
-    } else if (action === "rest-timer") {
-      toast(state.preferences.restTimer + " second rest timer started.");
-    } else if (action === "create-routine") {
-      createRoutine();
-    } else if (action === "start-routine") {
-      startRoutine(routineId);
-    } else if (action === "edit-routine") {
-      toast("Routine editor opened.");
-    } else if (action === "duplicate-routine") {
-      duplicateRoutine(routineId);
-    } else if (action === "delete-routine") {
-      deleteRoutine(routineId);
-    } else if (action === "save-weight") {
-      saveWeight();
-    } else if (action === "save-meal") {
-      saveMeal();
-    } else if (action === "toggle-integration") {
-      toggleIntegration(key);
-    } else if (action === "sync-integration") {
-      syncIntegration(key);
-    } else if (action === "toggle-auto-sync") {
-      toggleAutoSync(key);
-    } else if (action === "import-health-export") {
-      triggerHiddenFile("health-import-file");
-    } else if (action === "import-hevy-file") {
-      triggerHiddenFile("hevy-import-file");
-    } else if (action === "upgrade-user") {
-      adminUpgradeUser(actionNode.getAttribute("data-user"));
-    } else if (action === "downgrade-user") {
-      adminDowngradeUser(actionNode.getAttribute("data-user"));
-    } else if (action === "delete-user") {
-      adminDeleteUser(actionNode.getAttribute("data-user"));
-    } else if (action === "toggle-pref") {
-      state.preferences[key] = !state.preferences[key];
-      render();
-    } else if (action === "export-data") {
-      if (requirePremiumFeature("Premium export")) exportData();
-    } else if (action === "export-csv") {
-      exportCsv();
-    } else if (action === "clear-cache") {
-      localStorage.clear();
-      location.reload();
-    } else if (action === "upgrade") {
-      toast("Premium is managed by admin. Ask an admin to change this account plan.");
-    } else if (action === "close-modal") {
-      closeModal(event);
-    } else if (action === "select-exercise") {
-      selectExercise(actionNode.getAttribute("data-name"));
-    } else if (action === "noop") {
-      toast("Setting saved.");
-    }
+    if (recentRecords(14).length) notes.push({ tone: "good", icon: "trophy", title: `${recentRecords(14).length} new records in the last 2 weeks`, text: "Whatever you're doing, it's working." });
+    if (!notes.length) notes.push({ tone: "good", icon: "check", title: "Nothing to flag", text: "Training looks steady. Keep stacking sessions." });
+    return notes;
   }
 
-  function handleSubmit(event) {
-    var form = event.target.getAttribute("data-form");
-    if (!form) return;
-    event.preventDefault();
-    if (form === "member") submitMember(event.target);
-    else if (form === "reset") submitReset(event.target);
+  function account() {
+    const u = state.user, s = settings();
+    return h`<h1 class="page-title">Account</h1>
+      <div class="grid two">
+        <section class="card" style="--i:0"><header class="card-head"><h2>Profile</h2><span class="muted">${u.email}</span></header>
+          <form class="form" data-form="profile">
+            <label class="field"><span>Name</span><input name="name" value="${u.name}" required maxlength="120"></label>
+            <label class="field"><span>Goal</span><select name="goal">${["Strength", "Muscle gain", "Fat loss", "General fitness", "Endurance"].map(g => h`<option ${u.goal === g ? "selected" : ""}>${g}</option>`)}</select></label>
+            <label class="field"><span>Bio</span><textarea name="bio" rows="2" maxlength="300">${s.bio || ""}</textarea></label>
+            <button class="btn primary">Save profile</button>
+          </form>
+        </section>
+        <section class="card" style="--i:1"><header class="card-head"><h2>Training preferences</h2></header>
+          <form class="form" data-form="prefs">
+            <div class="form-row">
+              <label class="field"><span>Units</span><select name="units"><option value="kg" ${unit() === "kg" ? "selected" : ""}>Kilograms</option><option value="lb" ${unit() === "lb" ? "selected" : ""}>Pounds</option></select></label>
+              <label class="field"><span>Rest timer</span><select name="rest">${[0, 60, 90, 120, 180, 240].map(v => h`<option value="${v}" ${(s.rest ?? 90) === v ? "selected" : ""}>${v ? clock(v) : "Off"}</option>`)}</select></label>
+              <label class="field"><span>Sessions / week</span><input name="target" inputmode="numeric" value="${s.target || 4}"></label>
+            </div>
+            <div class="form-row">
+              <label class="field"><span>Calories / day</span><input name="kcal" inputmode="numeric" value="${s.kcal || 2400}"></label>
+              <label class="field"><span>Protein (g)</span><input name="protein" inputmode="numeric" value="${s.protein || 160}"></label>
+              <label class="field"><span>Water (L)</span><input name="water" inputmode="decimal" value="${s.water || 3}"></label>
+            </div>
+            <button class="btn primary">Save preferences</button>
+          </form>
+        </section>
+        ${state.mode === "server" ? h`<section class="card" style="--i:2"><header class="card-head"><h2>Password</h2></header>
+          <form class="form" data-form="password">
+            <label class="field"><span>Current password</span><input name="current" type="password" autocomplete="current-password" required></label>
+            <label class="field"><span>New password</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+            <button class="btn">Change password</button>
+          </form></section>` : ""}
+        <section class="card" style="--i:3"><header class="card-head"><h2>Your data</h2><span class="muted">${state.workouts.length} workouts · ${state.meals.length} meals · ${state.weights.length} weigh-ins</span></header>
+          <p class="muted">${state.mode === "server" ? `Stored on the FitRank server${state.store === "memory" ? ", in memory only: it's gone when the server restarts" : " in PostgreSQL"}.` : "Stored only in this browser. Export it before clearing site data."}</p>
+          <div class="row-actions"><button class="btn" data-act="export" data-format="json">${icon("download", 16)}Export JSON</button><button class="btn" data-act="export" data-format="csv">${icon("download", 16)}Export CSV</button></div>
+        </section>
+      </div>
+      <section class="card danger-card" style="--i:4">
+        <div class="row-actions"><button class="btn" data-act="signout">${icon("logout", 16)}${state.mode === "demo" ? "Leave demo" : "Sign out"}</button></div>
+        ${u.role === "ADMIN" ? "" : h`<div class="danger-zone">${armedBtn("account", "delete-account", state.mode === "demo" ? "Erase demo data" : "Delete account and all data")}</div>`}
+      </section>`;
   }
 
-  function handleInput(event) {
-    var input = event.target.getAttribute("data-input");
-    if (!input) return;
+  function adminPage() {
+    const a = state.admin;
+    if (!a) return h`<h1 class="page-title">Admin</h1><section class="card"><div class="skeleton"></div><div class="skeleton"></div></section>`;
+    const st = a.stats, topMax = Math.max(1, ...st.topExercises.map(t => t.sets));
+    return h`<h1 class="page-title">Admin</h1>
+      <section class="card tiles" style="--i:0">
+        <div><span class="muted">Users</span><b>${count(st.users)}</b></div>
+        <div><span class="muted">Premium</span><b>${count(st.premium)}</b></div>
+        <div><span class="muted">Workouts</span><b>${count(st.workouts)}</b></div>
+        <div><span class="muted">Sets</span><b>${count(st.sets)}</b></div>
+        <div><span class="muted">Volume lifted</span><b>${count(st.volume, "vol")}<small> kg</small></b></div>
+      </section>
+      <div class="grid two">
+        <section class="card" style="--i:1"><header class="card-head"><h2>Users</h2>
+          <label class="search">${icon("search", 16)}<input data-bind="admin-q" value="${state.adminQ}" placeholder="Search name or email" aria-label="Search users"></label></header>
+          <ul class="list users">${a.users.map(u => h`<li>
+            <span class="avatar">${initials(u.name)}</span>
+            <div><b>${u.name}</b><span class="muted">${u.email} · joined ${u.createdAt ? fmtDate(Date.parse(u.createdAt), { month: "short", day: "numeric", year: "numeric" }) : "–"}</span></div>
+            ${u.role === "ADMIN" ? h`<span class="chip ok">Admin</span>` : h`
+              <select data-change="plan" data-id="${u.id}" aria-label="Plan for ${u.name}"><option value="FREE" ${u.plan === "FREE" ? "selected" : ""}>Free</option><option value="PREMIUM" ${u.plan === "PREMIUM" ? "selected" : ""}>Premium</option></select>
+              ${armedBtn("u" + u.id, "delete-user", "Delete", `data-id="${u.id}"`)}`}
+          </li>`)}</ul>
+          ${a.users.length ? "" : empty("search", "No users match", "Try another search.")}
+        </section>
+        <section class="card" style="--i:2"><header class="card-head"><h2>Most logged exercises</h2><span class="muted">All users · sets</span></header>
+          ${st.topExercises.length ? h`<ul class="hbars">${st.topExercises.map((t, i) => h`<li style="--i:${i}"><span>${t.exercise}</span><span class="hbar"><i style="--w:${(t.sets / topMax) * 100}%"></i></span><b>${t.sets}</b></li>`)}</ul>`
+            : empty("activity", "No sets logged yet", "This fills as members train.")}
+        </section>
+      </div>`;
+  }
 
-    if (input === "search") {
-      state.search = event.target.value;
-    } else if (input === "set-weight" || input === "set-reps") {
-      updateSetField(event.target.getAttribute("data-exercise"), event.target.getAttribute("data-set"), input === "set-weight" ? "weight" : "reps", event.target.value);
-    } else if (input === "weight-log") {
-      state.pendingWeight = event.target.value;
-    } else if (input === "meal-name") {
-      state.pendingMeal.name = event.target.value;
-    } else if (input === "meal-calories") {
-      state.pendingMeal.calories = event.target.value;
-    } else if (input === "meal-protein") {
-      state.pendingMeal.protein = event.target.value;
-    } else if (input === "meal-water") {
-      state.pendingMeal.water = event.target.value;
-    } else if (input === "profile-name") {
-      state.profile.fullName = event.target.value;
-      state.profile.avatar = initials(event.target.value);
-    } else if (input === "profile-bio") {
-      state.profile.bio = event.target.value;
-    } else if (input === "exercise-search") {
-      if (state.modal && state.modal.type === "exercise-picker") {
-        state.modal.query = event.target.value;
-        var grid = document.querySelector(".exercise-picker-grid");
-        if (grid) {
-          var query = state.modal.query.toLowerCase();
-          var results = EXERCISE_LIBRARY.filter(function (ex) {
-            if (!query) return true;
-            return ex.name.toLowerCase().indexOf(query) > -1 ||
-              ex.category.toLowerCase().indexOf(query) > -1 ||
-              ex.primaryMuscle.toLowerCase().indexOf(query) > -1;
-          }).slice(0, 100);
-          grid.innerHTML = results.map(function (exercise) {
-            return '<button class="exercise-option" data-action="select-exercise" data-name="' + escapeAttr(exercise.name) + '"><strong>' + escapeHtml(exercise.name) + '</strong><span>' + escapeHtml(exercise.category) + " &bull; " + escapeHtml(exercise.primaryMuscle) + " &bull; " + escapeHtml(exercise.equipment) + '</span></button>';
-          }).join("");
-        }
-      }
-    } else if (input === "hevy-file") {
-      previewImport(event.target.files && event.target.files[0]);
-    } else if (input === "health-file") {
-      previewHealthImport(event.target.files && event.target.files[0]);
+  // auth / demo entry
+  function authPage() {
+    const a = state.auth;
+    const err = a.error ? h`<p class="form-error" role="alert">${a.error}</p>` : "";
+    const info = a.info ? h`<p class="form-info" role="status">${a.info}</p>` : "";
+    let card;
+    if (state.mode === "demo") {
+      card = h`<h2>Explore FitRank</h2>
+        <p class="muted">No FitRank server is reachable from this page, so it runs as a demo: sample training history, and everything you add is saved only in this browser.</p>
+        <button class="btn primary big wide" data-act="demo">${icon("play", 18)}Open the demo</button>
+        <p class="fine">To sign in and keep data in PostgreSQL, run the Java server and open the address it prints.</p>`;
+    } else if (a.view === "reset") {
+      card = h`<h2>Reset password</h2>
+        <form class="form" data-form="forgot"><label class="field"><span>Email</span><input name="email" type="email" value="${a.email}" required autocomplete="email"></label>
+          <button class="btn wide">Send reset code</button></form>
+        <p class="fine">There's no email service: the 6-digit code appears in the console of the FitRank server.</p>
+        <form class="form" data-form="reset">
+          <input type="hidden" name="email" value="${a.email}">
+          <label class="field"><span>6-digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" required maxlength="6"></label>
+          <label class="field"><span>New password</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+          ${err}${info}
+          <button class="btn primary wide">Set new password</button>
+        </form>
+        <button class="link" data-act="auth-view" data-view="signin">Back to sign in</button>`;
+    } else {
+      const up = a.view === "signup";
+      card = h`<div class="seg wide" role="tablist">
+          <button role="tab" data-act="auth-view" data-view="signin" aria-selected="${!up}">Sign in</button>
+          <button role="tab" data-act="auth-view" data-view="signup" aria-selected="${up}">Create account</button></div>
+        <form class="form" data-form="${up ? "signup" : "signin"}">
+          ${up ? h`<label class="field"><span>Name</span><input name="name" required maxlength="120" autocomplete="name"></label>` : ""}
+          <label class="field"><span>Email</span><input name="email" type="email" value="${a.email}" required autocomplete="email"></label>
+          <label class="field"><span>Password</span><input name="password" type="password" required ${up ? h`minlength="8" autocomplete="new-password"` : h`autocomplete="current-password"`}></label>
+          ${up ? h`<label class="field"><span>Main goal</span><select name="goal">${["Strength", "Muscle gain", "Fat loss", "General fitness", "Endurance"].map(g => h`<option>${g}</option>`)}</select></label>` : ""}
+          ${err}${info}
+          <button class="btn primary big wide" ${state.busy ? "disabled" : ""}>${up ? "Create account" : "Sign in"}</button>
+        </form>
+        ${up ? "" : h`<button class="link" data-act="auth-view" data-view="reset">Forgot password?</button>`}`;
     }
+    return h`<div class="auth">
+      <canvas id="pulse" aria-hidden="true"></canvas>
+      <section class="auth-copy">
+        <div class="brand"><img src="assets/icon.svg" alt="" width="34" height="34"><span>FitRank</span></div>
+        <h1>Every set, ranked against your last.</h1>
+        <p>Log lifts fast, bring in your Hevy and Apple Health history, and watch real progress land in your charts.</p>
+      </section>
+      <section class="card auth-card">${card}</section>
+    </div>`;
   }
 
-  function handleChange(event) {
-    var selectName = event.target.getAttribute("data-select");
-    if (!selectName) return;
-    var value = event.target.value;
-    if (selectName === "range-filter") state.dateRange = value;
-    else if (selectName === "exercise-filter") state.selectedExercise = value;
-    else if (selectName === "pref-units") state.preferences.units = value;
-    else if (selectName === "pref-distance") state.preferences.distance = value;
-    else if (selectName === "pref-rest") state.preferences.restTimer = Number(value);
-    else if (selectName === "pref-sync") state.preferences.syncFrequency = value;
+  // ---------- sheets ----------
+  function sheetView() {
+    const s = state.sheet;
+    if (!s) return "";
+    const body = SHEETS[s.type](s);
+    return h`<div class="sheet-backdrop${state.shownSheet ? "" : " in"}" data-act="close-sheet"></div>
+      <div class="sheet${state.shownSheet === s.type ? "" : " in"}" role="dialog" aria-modal="true" aria-label="${body.title}">
+        <header class="sheet-head"><h2>${body.title}</h2><button class="icon-btn" data-act="close-sheet" aria-label="Close">${icon("x")}</button></header>
+        <div class="sheet-body">${body.html}</div>
+      </div>`;
+  }
+
+  const SHEETS = {
+    more: () => ({ title: "More", html: h`<nav class="more-grid">${routes().filter(n => !TABS.includes(n[0])).map(([id, label, ic]) => h`<a href="#/${id}" class="more-link">${icon(ic, 22)}<span>${label}</span></a>`)}</nav>` }),
+    picker: s => ({ title: s.forRoutine ? "Add to routine" : "Add exercise", html: h`
+      <label class="search big">${icon("search", 18)}<input data-bind="pick-q" value="${s.q || ""}" placeholder="Search 90+ exercises" aria-label="Search exercises" autofocus></label>
+      <div class="seg scroll" role="group" aria-label="Muscle group">${["All", ...GROUPS].map(g => h`<button data-act="pick-group" data-group="${g}" aria-pressed="${(s.group || "All") === g}">${g}</button>`)}</div>
+      <div id="pick-list" class="pick-list">${new Raw(pickList(s))}</div>
+      ${s.forRoutine ? h`<button class="btn primary wide" data-act="close-sheet">Done</button>` : ""}` }),
+    exercise: s => {
+      const x = state.live.exercises.find(e => e.id === s.ex), meta = lib(x.name);
+      return { title: x.name, html: h`<div class="menu">
+        <button data-act="cues" data-ex="${x.id}">${icon(premium() ? "insights" : "lock", 18)}Form cues${premium() ? "" : " (Premium)"}</button>
+        <button data-act="move" data-dir="-1" data-ex="${x.id}">${icon("up", 18)}Move up</button>
+        <button data-act="move" data-dir="1" data-ex="${x.id}">${icon("down", 18)}Move down</button>
+        <button data-act="pick" data-replace="${x.id}">${icon("repeat", 18)}Replace exercise</button>
+        <div class="danger-zone">${armedBtn("ex" + x.id, "remove-exercise", "Remove from workout", `data-ex="${x.id}"`)}</div>
+      </div>${meta ? h`<p class="fine">${meta.group} · ${meta.equipment}</p>` : ""}` };
+    },
+    cues: s => {
+      const meta = lib(s.name) || { pattern: "", group: groupOf(s.name), equipment: "Any" };
+      const path = /curl|raise|fly/.test(meta.pattern) ? "M30 90 Q30 30 90 30" : /row|pull|carry|cardio/.test(meta.pattern) ? "M20 60 H100" : "M60 95 V25";
+      return { title: s.name, html: h`<div class="cue-demo" aria-hidden="true"><svg viewBox="0 0 120 120"><path class="cue-track" d="${path}"/><path class="cue-path" d="${path}" pathLength="1"/><circle class="cue-dot" r="7" style="offset-path:path('${path}')"/></svg></div>
+        <ol class="cues">${(CUES[meta.pattern] || ["Move with control", "Use a pain-free range", "Brace before each rep"]).map(c => h`<li>${c}</li>`)}</ol>
+        <p class="fine">${meta.group} · ${meta.equipment}. Stop if anything hurts.</p>` };
+    },
+    rename: s => {
+      const w = state.workouts.find(x => x.id === s.id);
+      return { title: "Rename workout", html: h`<form class="form" data-form="rename"><input type="hidden" name="id" value="${w.id}">
+        <label class="field"><span>Name</span><input name="title" value="${w.title}" required maxlength="160" autofocus></label><button class="btn primary wide">Save</button></form>` };
+    },
+    routine: s => ({ title: s.id ? "Edit routine" : "New routine", html: h`<form class="form" data-form="routine">
+        <label class="field"><span>Name</span><input name="name" value="${s.name || ""}" required maxlength="80" placeholder="Push day" data-bind="routine-name"></label>
+        <ol class="routine-edit">${(s.exercises || []).map((e, i) => h`<li><span>${e}</span><button type="button" class="icon-btn" data-act="routine-drop" data-index="${i}" aria-label="Remove ${e}">${icon("x", 18)}</button></li>`)}</ol>
+        <button type="button" class="btn wide" data-act="pick" data-for-routine="1">${icon("plus", 16)}Add exercises</button>
+        <button class="btn primary wide" ${(s.exercises || []).length ? "" : "disabled"}>Save routine</button>
+      </form>` }),
+    summary: s => ({ title: "Workout saved", html: h`<div class="finish">
+        <div class="finish-ring">${icon("check", 40)}</div>
+        <h3>${s.workout.title}</h3>
+        <div class="stat-row center">
+          <div><span class="muted">Duration</span><b>${count(s.workout.durationMinutes)} min</b></div>
+          <div><span class="muted">Volume</span><b>${count(vol(s.workout), "vol")} ${unit()}</b></div>
+          <div><span class="muted">Sets</span><b>${count(s.workout.sets.length)}</b></div>
+        </div>
+        ${s.prs.length ? h`<ul class="records">${s.prs.map(p => h`<li>${icon("trophy", 18)}<div><b>${p.exercise}</b><span class="muted">New e1RM ${fmtW(p.e1)} ${unit()}</span></div></li>`)}</ul>` : ""}
+        <div class="row-actions center"><button class="btn" data-act="save-routine-from" data-id="${s.workout.id}">${icon("routines", 16)}Save as routine</button><button class="btn primary" data-act="close-sheet">Done</button></div>
+      </div>` }),
+  };
+
+  function pickList(s) {
+    const q = (s.q || "").trim().toLowerCase(), g = s.group || "All";
+    const used = new Set(state.workouts.flatMap(w => w.sets.map(x => x.exercise)));
+    const names = [...new Set([...LIB.map(e => e.name), ...used])];
+    const found = names.filter(n => (g === "All" || groupOf(n) === g) && (!q || n.toLowerCase().includes(q))).sort((a, b) => used.has(b) - used.has(a) || a.localeCompare(b)).slice(0, 80);
+    const chosen = new Set(s.forRoutine ? (state.sheetReturn && state.sheetReturn.exercises) || [] : []);
+    return out(h`${found.map(n => h`<button class="pick" data-act="pick-one" data-name="${n}" ${chosen.has(n) ? h`aria-pressed="true"` : ""}><b>${n}</b><span class="muted">${groupOf(n)}${(lib(n) || {}).equipment ? " · " + lib(n).equipment : ""}${used.has(n) ? " · logged before" : ""}</span>${icon(chosen.has(n) ? "check" : "plus", 18)}</button>`)}
+      ${q && !names.some(n => n.toLowerCase() === q) ? h`<button class="pick custom" data-act="pick-one" data-name="${s.q.trim()}"><b>Add “${s.q.trim()}”</b><span class="muted">Custom exercise</span>${icon("plus", 18)}</button>` : ""}
+      ${found.length || q ? "" : empty("search", "Nothing here", "Try another group.")}`);
+  }
+
+  // ---------- actions ----------
+  const toast = (text, tone = "") => {
+    const t = $("#toast");
+    t.className = "toast show " + tone;
+    t.textContent = text;
+    clearTimeout(toast.t);
+    toast.t = setTimeout(() => { t.className = "toast"; }, 2800);
+  };
+  const fail = e => toast(e.message || String(e), "bad");
+  const findLive = id => state.live.exercises.find(x => x.id === id);
+  const newExercise = name => {
+    const prev = previousSets(name);
+    return { id: uid(), name, sets: Array.from({ length: Math.max(1, prev.length) }, () => ({ id: uid(), weight: "", reps: "", done: false })) };
+  };
+
+  function startWorkout(routineId) {
+    if (state.live) return go("log");
+    const r = routineId && (settings().routines || []).find(x => x.id === routineId);
+    state.live = { title: r ? r.name : defaultTitle(), startedAt: Date.now(), exercises: r ? r.exercises.map(newExercise) : [] };
+    saveLive();
+    go("log");
+  }
+  const defaultTitle = () => { const hr = new Date().getHours(); return hr < 12 ? "Morning workout" : hr < 18 ? "Afternoon workout" : "Evening workout"; };
+
+  function tick(row) {
+    const x = findLive(row.closest("[data-ex]").dataset.ex), s = x.sets.find(y => y.id === row.dataset.set);
+    if (s.done) { s.done = false; state.flash = null; saveLive(); return render(); }
+    const [wIn, rIn] = row.querySelectorAll("input");
+    const previous = input => /^[\d.,]+$/.test(input.placeholder) ? input.placeholder.replace(/,/g, "") : "";
+    s.weight = wIn.value || previous(wIn);
+    s.reps = rIn.value || previous(rIn);
+    if (!(+s.reps > 0)) { rIn.focus(); return toast("Enter reps first"); }
+    s.done = true;
+    const e = e1rm(fromU(+s.weight || 0), +s.reps);
+    const sessionBest = Math.max(0, ...x.sets.filter(y => y.done && y !== s).map(y => e1rm(fromU(+y.weight || 0), +y.reps)));
+    const historic = bestE1(x.name);
+    state.flash = { set: s.id, pr: historic > 0 && e > historic + 0.01 && e > sessionBest + 0.01 };
+    if (navigator.vibrate) navigator.vibrate(state.flash.pr ? [12, 40, 12] : 10);
+    saveLive();
     render();
+    state.flash = null;
+    rest.start(settings().rest ?? 90);
   }
 
-  function submitMember(form) {
-    var data = new FormData(form);
-    var fullName = String(data.get("fullName") || "").trim();
-    var email = String(data.get("email") || "").trim().toLowerCase();
-    var password = String(data.get("password") || "").trim();
-    var confirmPassword = String(data.get("confirmPassword") || "").trim();
-    var goal = String(data.get("goal") || "Strength");
-
-    state.authError = "";
-    state.authInfo = "";
-
-    if (!email || !password) {
-      state.authError = "Email and password are required.";
-      render();
-      return;
-    }
-
-    if (state.authMode === "signup" && password !== confirmPassword) {
-      state.authError = "Passwords do not match.";
-      render();
-      return;
-    }
-
-    if (state.authMode === "signup" && state.passwords[email]) {
-      state.authError = "An account with this email already exists.";
-      render();
-      return;
-    }
-
-    if (state.authMode === "login" && email === "admin@fitrank.app" && password === "Admin@123") {
-      state.user = {
-        id: 999,
-        name: "FitRank Admin",
-        email: email,
-        goal: "Administration",
-        plan: "ADMIN"
-      };
-      state.admin = { email: email, privileges: ["USER_MANAGE", "CONTENT_MANAGE", "ANALYTICS_VIEW"] };
-      syncCurrentUserRecord();
-      loadUserData(state.user.id);
-      setPage("admin");
-      toast("Logged in with admin privileges.");
-      render();
-      return;
-    }
-
-    if (state.authMode === "login" && (state.passwords[email] || "password") !== password) {
-      state.authError = "Invalid email or password.";
-      render();
-      return;
-    }
-
-    state.user = {
-      id: findExistingUserId(email) || uid(),
-      name: fullName || email.split("@")[0],
-      email: email,
-      goal: goal,
-      plan: findExistingPlan(email) || "FREE"
-    };
-    state.passwords[email] = password;
-    state.admin = null;
-    loadUserData(state.user.id);
-    state.profile.fullName = state.user.name;
-    state.profile.avatar = initials(state.user.name);
-    syncCurrentUserRecord();
-    setPage("dashboard");
-    toast(state.authMode === "signup" ? "Account created." : "Logged in successfully.");
-    render();
-  }
-
-  function submitReset(form) {
-    var data = new FormData(form);
-    var email = String(data.get("email") || "").trim().toLowerCase();
-    var token = String(data.get("token") || "").trim();
-    var password = String(data.get("password") || "").trim();
-    var confirmPassword = String(data.get("confirmPassword") || "").trim();
-
-    state.authError = "";
-    state.authInfo = "";
-
-    if (!email || !token || !password) {
-      state.authError = "Email, reset token, and new password are required.";
-      render();
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      state.authError = "Passwords do not match.";
-      render();
-      return;
-    }
-
-    // Check locally-issued token first (works offline / without backend)
-    var localTokenKey = "__reset__" + email;
-    if (state.passwords[localTokenKey] && state.passwords[localTokenKey] === token) {
-      state.passwords[email] = password;
-      delete state.passwords[localTokenKey];
-      state.authMode = "login";
-      state.authInfo = "Password updated successfully. You can now log in with your new password.";
-      state.pendingReset = { email: email, password: "", confirm: "", token: "" };
-      clearResetUrl();
-      render();
-      return;
-    }
-
-    fetch(API + "/auth/reset", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email, token: token, password: password })
-    }).then(function (response) {
-      return response.json().then(function (json) {
-        return { ok: response.ok, json: json };
+  async function finish(btn) {
+    const sets = liveDone();
+    if (!sets.length) return toast("Complete at least one set first");
+    const L = state.live;
+    btn.disabled = true;
+    try {
+      const prs = groupSets(sets).map(e => ({ exercise: e.name, e1: Math.max(...e.sets.map(s => e1rm(s.weight, s.reps))) })).filter(p => bestE1(p.exercise) && p.e1 > bestE1(p.exercise) + 0.01);
+      const saved = await db.save("workouts", {
+        title: L.title.trim() || defaultTitle(), loggedAt: new Date(L.startedAt).toISOString(),
+        durationMinutes: Math.max(1, Math.round((Date.now() - L.startedAt) / 60000)), calories: 0, notes: "",
+        sets: sets.map(s => ({ ...s, rpe: 0, tag: "normal" })),
       });
-    }).then(function (result) {
-      if (!result.ok) throw new Error(result.json.error || "Unable to reset password.");
-      state.passwords[email] = password;
-      state.authMode = "login";
-      state.authInfo = result.json.message || "Password updated. You can log in now.";
-      state.pendingReset = { email: email, password: "", confirm: "", token: "" };
-      clearResetUrl();
-      render();
-    }).catch(function () {
-      state.authError = "Invalid or expired reset token.";
-      render();
-    });
+      state.workouts = sortDesc([saved, ...state.workouts]);
+      state.live = null;
+      saveLive();
+      rest.stop();
+      go("home", true, { type: "summary", workout: saved, prs });
+    } catch (e) { btn.disabled = false; fail(e); }
   }
 
-  function requestPasswordReset(email) {
-    state.authError = "";
-    state.authInfo = "";
-    email = String(email || "").trim().toLowerCase();
-
-    if (!email) {
-      state.authError = "Enter your email first, then request a reset link.";
+  async function removeEntry(kind, id, listKey, label) {
+    try {
+      await db.remove(kind, id);
+      state[listKey] = state[listKey].filter(x => x.id !== id);
+      state.armed = null;
       render();
-      return;
-    }
+      toast(label);
+    } catch (e) { fail(e); }
+  }
 
-    if (!state.passwords[email] && email !== "athlete@fitrank.app") {
-      state.authError = "No account found with that email address.";
+  async function loadAdmin() {
+    try {
+      const [stats, users] = await Promise.all([server.admin.stats(), server.admin.users(state.adminQ)]);
+      state.admin = { stats, users };
+      if (state.route === "admin") { state.enter = true; render(); }
+    } catch (e) { fail(e); }
+  }
+
+  const ACTIONS = {
+    start: el => startWorkout(el.dataset.routine),
+    finish: el => finish(el),
+    tick: el => tick(el.closest(".set")),
+    "add-set": el => { findLive(el.closest("[data-ex]").dataset.ex).sets.push({ id: uid(), weight: "", reps: "", done: false }); saveLive(); render(); },
+    discard: () => { state.live = null; saveLive(); rest.stop(); state.armed = null; go("home"); toast("Workout discarded"); },
+    arm: el => { state.armed = el.dataset.key; render(); clearTimeout(ACTIONS.t); ACTIONS.t = setTimeout(() => { state.armed = null; render(); }, 3500); },
+    sheet: el => { const d = el.dataset; state.sheet = d.sheet === "routine" ? routineDraft(d.id) : { type: d.sheet, ex: d.ex, id: d.id && +d.id }; render(); },
+    "close-sheet": () => closeSheet(),
+    pick: el => {
+      if (el.dataset.forRoutine) { state.sheetReturn = state.sheet; state.sheetReturn.name = $("[data-bind=routine-name]").value; state.sheet = { type: "picker", forRoutine: true }; }
+      else state.sheet = { type: "picker", replace: el.dataset.replace };
       render();
-      return;
+    },
+    "pick-group": el => { state.sheet.group = el.dataset.group; render(); },
+    "pick-one": el => {
+      const name = el.dataset.name, s = state.sheet;
+      if (s.forRoutine) {
+        const r = state.sheetReturn, list = r.exercises;
+        list.includes(name) ? list.splice(list.indexOf(name), 1) : list.push(name);
+        $("#pick-list").innerHTML = pickList(s);
+        return;
+      }
+      if (!state.live) startWorkout();
+      if (s.replace) { const x = findLive(s.replace); Object.assign(x, newExercise(name), { id: x.id }); }
+      else state.live.exercises.push(newExercise(name));
+      saveLive();
+      state.sheet = null;
+      render();
+    },
+    move: el => { const L = state.live.exercises, i = L.findIndex(x => x.id === el.dataset.ex), j = i + +el.dataset.dir; if (j >= 0 && j < L.length) [L[i], L[j]] = [L[j], L[i]]; saveLive(); state.sheet = null; render(); },
+    "remove-exercise": el => { state.live.exercises = state.live.exercises.filter(x => x.id !== el.dataset.ex); saveLive(); state.sheet = null; state.armed = null; render(); },
+    cues: el => { if (!premium()) return toast("Form cues are part of Premium"); state.sheet = { type: "cues", name: findLive(el.dataset.ex).name }; render(); },
+    repeat: el => {
+      if (state.live) return toast("Finish or discard the current workout first");
+      const w = state.workouts.find(x => x.id === +el.dataset.id);
+      state.live = { title: w.title, startedAt: Date.now(), exercises: groupSets(w.sets).map(e => newExercise(e.name)) };
+      saveLive();
+      go("log");
+    },
+    "delete-workout": el => removeEntry("workouts", +el.dataset.id, "workouts", "Workout deleted"),
+    "delete-meal": el => removeEntry("meals", +el.dataset.id, "meals", "Meal deleted"),
+    "delete-routine": async el => { try { await saveSettings({ routines: (settings().routines || []).filter(r => r.id !== el.dataset.id) }); state.armed = null; render(); toast("Routine deleted"); } catch (e) { fail(e); } },
+    "routine-drop": el => { const s = state.sheet; s.name = $("[data-bind=routine-name]").value; s.exercises.splice(+el.dataset.index, 1); render(); },
+    "save-routine-from": el => { const w = state.workouts.find(x => x.id === +el.dataset.id); state.sheet = { type: "routine", name: w.title, exercises: groupSets(w.sets).map(e => e.name) }; render(); },
+    range: el => { state.range = el.dataset.range; state.enter = true; render(); },
+    export: el => exportData(el.dataset.format),
+    "import-go": () => runImport(),
+    "import-cancel": () => { state.preview = null; render(); },
+    "auth-view": el => { state.auth = { ...state.auth, view: el.dataset.view, error: "", info: "" }; render(); },
+    demo: async () => { load(demo.read() || await demo.start()); go("home"); },
+    signout: () => { store.set(K.token, null); state.user = null; state.sheet = null; state.admin = null; rest.stop(); history.replaceState(null, "", "#/home"); render(); },
+    "delete-account": async () => {
+      try { await db.deleteMe(); store.set(K.token, null); store.set(K.live, null); state.live = null; state.user = null; state.armed = null; render(); toast(state.mode === "demo" ? "Demo data erased" : "Account deleted"); } catch (e) { fail(e); }
+    },
+    "delete-user": async el => {
+      try { await server.admin.remove(+el.dataset.id); state.armed = null; await loadAdmin(); toast("User deleted"); } catch (e) { fail(e); }
+    },
+  };
+
+  /** A picker opened from the routine editor closes back into it. */
+  function closeSheet() {
+    state.sheet = state.sheet && state.sheet.forRoutine ? state.sheetReturn : null;
+    render();
+  }
+
+  const routineDraft = id => {
+    const r = (settings().routines || []).find(x => x.id === id);
+    return { type: "routine", id, name: r ? r.name : "", exercises: r ? r.exercises.slice() : [] };
+  };
+
+  const FORMS = {
+    async signin(f) { const r = await server.login(f); store.set(K.token, r.token); load(await server.me()); go("home"); },
+    async signup(f) { const r = await server.signup(f); store.set(K.token, r.token); load(await server.me()); go("home"); toast("Welcome to FitRank"); },
+    async forgot(f) { const r = await server.forgot(f); state.auth = { ...state.auth, email: f.email, info: r.message, error: "" }; },
+    async reset(f) { const r = await server.reset(f); store.set(K.token, r.token); load(await server.me()); go("home"); toast("Password updated"); },
+    async weight(f) {
+      const kg = fromU(parseFloat(f.kg));
+      if (!(kg > 0)) throw new Error("Enter your weight");
+      state.weights = sortDesc([await db.save("weights", { kg, loggedAt: new Date().toISOString() }), ...state.weights]);
+      toast("Weight logged");
+    },
+    async meal(f) {
+      const m = await db.save("meals", { name: f.name, calories: +f.calories || 0, protein: +f.protein || 0, water: +f.water || 0, loggedAt: new Date().toISOString() });
+      state.meals = sortDesc([m, ...state.meals]);
+      toast("Meal saved");
+    },
+    async profile(f) { state.user = await db.saveMe({ name: f.name, goal: f.goal, settings: { ...settings(), bio: f.bio } }); toast("Profile saved"); },
+    async prefs(f) {
+      await saveSettings({ units: f.units, rest: +f.rest, target: clamp(+f.target || 4, 1, 14), kcal: +f.kcal || 2400, protein: +f.protein || 160, water: +f.water || 3 });
+      toast("Preferences saved");
+    },
+    async password(f, form) { await server.password(f); form.reset(); toast("Password changed"); },
+    async rename(f) {
+      const w = state.workouts.find(x => x.id === +f.id);
+      const saved = await db.save("workouts", { ...w, title: f.title });
+      state.workouts = state.workouts.map(x => x.id === saved.id ? saved : x);
+      state.sheet = null;
+      toast("Renamed");
+    },
+    async routine(f) {
+      const s = state.sheet, list = (settings().routines || []).slice();
+      const r = { id: s.id || uid(), name: f.name.trim(), exercises: s.exercises };
+      const i = list.findIndex(x => x.id === r.id);
+      i >= 0 ? (list[i] = r) : list.push(r);
+      await saveSettings({ routines: list });
+      state.sheet = null;
+      toast("Routine saved");
+    },
+  };
+
+  // ---------- import / export ----------
+  function parseCsv(text) {
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; } else if (c === '"') q = false; else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === ",") { row.push(cell); cell = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += c;
     }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(Boolean));
+  }
+  const MONTHS = "janfebmaraprmayjunjulaugsepoctnovdec";
+  /** Hevy writes "18 Apr 2026, 18:22"; Safari can't parse that natively. */
+  function parseDate(s) {
+    const m = String(s).match(/(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4}),?\s+(\d{1,2}):(\d{2})/);
+    const t = m ? +new Date(+m[3], MONTHS.indexOf(m[2].toLowerCase()) / 3, +m[1], +m[4], +m[5]) : Date.parse(s);
+    return isNaN(t) ? null : t;
+  }
 
-    var localToken = "FR-" + Math.random().toString(36).slice(2, 10).toUpperCase();
-    var resetUrl = location.origin + location.pathname + "?resetToken=" + localToken + "&email=" + encodeURIComponent(email);
+  function fromHevyCsv(text) {
+    const rows = parseCsv(text.replace(/^\uFEFF/, "")), head = (rows.shift() || []).map(x => x.trim().toLowerCase());
+    const col = k => head.indexOf(k);
+    if (col("exercise_title") < 0 || col("start_time") < 0) throw new Error("That CSV isn't a Hevy workout export (no exercise_title / start_time columns).");
+    const lb = col("weight_kg") < 0 && col("weight_lbs") >= 0, wCol = lb ? col("weight_lbs") : col("weight_kg");
+    const map = new Map();
+    for (const r of rows) {
+      const start = parseDate(r[col("start_time")]);
+      if (!start) continue;
+      const key = r[col("title")] + "|" + start;
+      if (!map.has(key)) {
+        const end = parseDate(r[col("end_time")]);
+        map.set(key, { title: r[col("title")] || "Workout", loggedAt: new Date(start).toISOString(), durationMinutes: end ? Math.max(0, Math.round((end - start) / 60000)) : 0, calories: 0, notes: "", sets: [] });
+      }
+      const w = parseFloat(r[wCol]) || 0;
+      map.get(key).sets.push({ exercise: r[col("exercise_title")], weight: lb ? w / 2.20462 : w, reps: parseInt(r[col("reps")], 10) || 0, rpe: parseFloat(r[col("rpe")]) || 0, tag: r[col("set_type")] || "normal" });
+    }
+    return { workouts: [...map.values()] };
+  }
 
-    state.passwords["__reset__" + email] = localToken;
-    state.authInfo = "Reset link generated. Check the console (F12) or use the link below to reset your password. In production, this would arrive by email.";
-    state.authInfo += " | Reset URL: " + resetUrl;
+  function fromJson(text) {
+    const d = JSON.parse(text), list = Array.isArray(d) ? d : d.workouts || [];
+    const workouts = list.map(w => {
+      const start = parseDate(w.loggedAt || w.start_time || w.date || w.createdAt) || Date.now(), end = parseDate(w.end_time);
+      const sets = w.sets && w.sets.length && w.sets[0].exercise ? w.sets
+        : (w.exercises || []).flatMap(e => (e.sets || []).map(s => ({ exercise: e.title || e.name, weight: +(s.weight_kg ?? s.weight ?? 0), reps: +(s.reps || 0), rpe: +(s.rpe || 0), tag: s.type || "normal" })));
+      return { title: w.title || w.name || "Workout", loggedAt: new Date(start).toISOString(), durationMinutes: w.durationMinutes || (end ? Math.round((end - start) / 60000) : 0), calories: w.calories || 0, notes: w.notes || "", sets: sets.map(s => ({ exercise: s.exercise, weight: +s.weight || 0, reps: +s.reps || 0, rpe: +s.rpe || 0, tag: s.tag || "normal" })) };
+    }).filter(w => w.sets.length);
+    const weights = (d.weights || []).map(x => ({ kg: +x.kg, loggedAt: x.loggedAt })).filter(x => x.kg > 0 && x.loggedAt);
+    return { workouts, weights };
+  }
 
-    fetch(API + "/auth/forgot", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: email, resetBaseUrl: location.origin + location.pathname, token: localToken })
-    }).then(function (response) {
-      return response.json().then(function (json) { return { ok: response.ok, json: json }; });
-    }).then(function (result) {
-      if (result.json && result.json.devResetUrl) {
-        state.authInfo = "Reset link sent (server confirmed). URL: " + result.json.devResetUrl;
+  /** Streams an Apple Health export.xml (often hundreds of MB) without loading it whole. */
+  async function fromHealth(file, onProgress) {
+    const since = Date.now() - 30 * DAY, steps = {}, energy = {}, resting = [], mass = {};
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    const attr = (tag, k) => { const m = tag.match(new RegExp(`\\b${k}="([^"]*)"`)); return m ? m[1] : ""; };
+    const when = s => Date.parse(s.replace(" ", "T").replace(/ ([+-]\d\d)(\d\d)$/, "$1:$2"));
+    let buf = "", read = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value; read += value.length;
+      const re = /<Record\b[^>]*>/g; let m, last = 0;
+      while ((m = re.exec(buf))) {
+        last = re.lastIndex;
+        const tag = m[0];
+        if (!/StepCount|ActiveEnergy|RestingHeartRate|BodyMass"/.test(tag)) continue;
+        const type = attr(tag, "type"), t = when(attr(tag, "startDate")), v = parseFloat(attr(tag, "value"));
+        if (!(v > 0) || isNaN(t)) continue;
+        if (type.endsWith("BodyMass")) mass[dayKey(t)] = { t, kg: attr(tag, "unit") === "lb" ? v / 2.20462 : v };
+        else if (t < since) continue;
+        else if (type.endsWith("StepCount")) steps[dayKey(t)] = (steps[dayKey(t)] || 0) + v;
+        else if (type.endsWith("ActiveEnergyBurned")) energy[dayKey(t)] = (energy[dayKey(t)] || 0) + (attr(tag, "unit") === "kJ" ? v / 4.184 : v);
+        else if (type.endsWith("RestingHeartRate")) resting.push(v);
+      }
+      buf = buf.slice(Math.max(last, buf.lastIndexOf("<")));
+      onProgress(read / file.size);
+    }
+    const avg = o => { const v = Object.values(o); return v.length ? Math.round(sum(v) / v.length) : 0; };
+    return {
+      health: { steps: avg(steps), activeKcal: avg(energy), restingHr: resting.length ? Math.round(sum(resting) / resting.length) : 0, importedAt: new Date().toISOString() },
+      weights: Object.values(mass).filter(x => x.t > Date.now() - 2 * 365 * DAY).map(x => ({ kg: Math.round(x.kg * 10) / 10, loggedAt: new Date(x.t).toISOString() })),
+    };
+  }
+
+  async function readFile(input) {
+    const file = input.files[0];
+    input.value = "";
+    if (!file) return;
+    try {
+      let parsed;
+      if (input.dataset.file === "health") {
+        state.importing = { label: "Reading " + file.name, done: 0, total: 100 };
         render();
-      }
-    }).catch(function () {
-      // Server not running â€” local token already set above, user can proceed.
-    });
-
-    render();
-  }
-
-  function readAuthEmail() {
-    var input = document.querySelector('form[data-form="member"] input[name="email"]');
-    return input ? input.value : "";
-  }
-
-  function clearResetUrl() {
-    try {
-      var cleanUrl = location.origin + location.pathname + location.hash;
-      history.replaceState({}, "", cleanUrl);
-    } catch (error) {
-      // Ignore URL cleanup failures in older browsers.
-    }
-  }
-
-  function findExistingUserId(email) {
-    for (var i = 0; i < state.users.length; i += 1) {
-      if (state.users[i].email === email) return state.users[i].id;
-    }
-    return null;
-  }
-
-  function findExistingPlan(email) {
-    for (var i = 0; i < state.users.length; i += 1) {
-      if (state.users[i].email === email) return state.users[i].plan;
-    }
-    return null;
-  }
-
-  function updateSetField(exerciseId, setId, fieldName, value) {
-    state.liveWorkout.exercises.forEach(function (exercise) {
-      if (exercise.id === exerciseId) {
-        exercise.sets.forEach(function (set) {
-          if (set.id === setId) set[fieldName] = value;
+        parsed = await fromHealth(file, p => {
+          const bar = $("#import-bar"), c = $("#import-count");
+          if (bar) bar.style.setProperty("--w", Math.round(p * 100) + "%");
+          if (c) c.textContent = Math.round(p * 100) + "%";
         });
-      }
-    });
-  }
-
-  function toggleSet(exerciseId, setId) {
-    state.liveWorkout.exercises.forEach(function (exercise) {
-      if (exercise.id === exerciseId) {
-        exercise.sets.forEach(function (set) {
-          if (set.id === setId) set.done = !set.done;
-        });
-      }
-    });
-    toast("Set updated.");
-    render();
-  }
-
-  function addSet(exerciseId) {
-    state.liveWorkout.exercises.forEach(function (exercise) {
-      if (exercise.id === exerciseId) {
-        var previous = exercise.sets.length ? exercise.sets[exercise.sets.length - 1] : { weight: 0, reps: 0 };
-        exercise.sets.push({ id: uid(), previous: (previous.weight || 0) + " x " + (previous.reps || 0), weight: "", reps: "", done: false });
-      }
-    });
-    render();
-  }
-
-  function deleteExercise(exerciseId) {
-    state.liveWorkout.exercises = state.liveWorkout.exercises.filter(function (exercise) { return exercise.id !== exerciseId; });
-    render();
-  }
-
-  function moveExercise(exerciseId, direction) {
-    var index = -1;
-    for (var i = 0; i < state.liveWorkout.exercises.length; i += 1) {
-      if (state.liveWorkout.exercises[i].id === exerciseId) {
-        index = i;
-        break;
-      }
-    }
-    var nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= state.liveWorkout.exercises.length) return;
-    var item = state.liveWorkout.exercises.splice(index, 1)[0];
-    state.liveWorkout.exercises.splice(nextIndex, 0, item);
-    render();
-  }
-
-  function openExercisePicker(mode, exerciseId) {
-    state.modal = {
-      type: "exercise-picker",
-      mode: mode || "add",
-      exerciseId: exerciseId || null,
-      query: ""
-    };
-    render();
-  }
-
-  function selectExercise(name) {
-    if (!state.modal || state.modal.type !== "exercise-picker") return;
-    if (state.modal.mode === "replace" && state.modal.exerciseId) {
-      state.liveWorkout.exercises.forEach(function (exercise) {
-        if (exercise.id === state.modal.exerciseId) {
-          exercise.name = name;
-        }
-      });
-    } else {
-      state.liveWorkout.exercises.push({
-        id: uid(),
-        name: name,
-        notes: "",
-        sets: [{ id: uid(), previous: previousSetHint(name), weight: "", reps: "", done: false }]
-      });
-    }
-    state.modal = null;
-    render();
-  }
-
-  function openFormDemo(exerciseId) {
-    var exercise = findExerciseById(exerciseId);
-    if (!exercise) return;
-    state.modal = {
-      type: "form-demo",
-      exerciseId: exerciseId,
-      exerciseName: exercise.name
-    };
-    render();
-  }
-
-  function closeModal(event) {
-    if (event && event.target && event.target.getAttribute("data-modal-card") === "true") return;
-    if (event && event.target && event.target.closest("[data-modal-card='true']") && !event.target.closest("[data-action='close-modal']")) return;
-    state.modal = null;
-    render();
-  }
-
-  function finishWorkout() {
-    var durationMinutes = Math.max(1, Math.round((Date.now() - state.liveWorkout.startedAt) / 60000));
-    var volume = 0;
-    state.liveWorkout.exercises.forEach(function (exercise) {
-      exercise.sets.forEach(function (set) {
-        volume += (Number(set.weight) || 0) * (Number(set.reps) || 0);
-      });
-    });
-
-    var workout = {
-      id: uid(),
-      title: state.liveWorkout.name,
-      createdAt: new Date().toISOString(),
-      durationMinutes: durationMinutes,
-      volume: volume,
-      calories: Math.round(durationMinutes * 7 + volume / 35),
-      likes: 0,
-      comments: [],
-      quote: motivationalQuote(),
-      exercises: clone(state.liveWorkout.exercises),
-      health: { heartRateAvg: state.healthData.heartRate || state.liveWorkout.heartRate || 0, recovery: Math.min(96, 74 + state.workouts.length * 2) }
-    };
-
-    state.workouts.unshift(workout);
-    state.liveWorkout = loadLiveWorkout();
-    toast("Workout saved.");
-    setPage("dashboard");
-    render();
-  }
-
-  function createRoutine() {
-    var name = prompt("Routine name");
-    if (!name) return;
-    state.routines.push({ id: uid(), name: name, days: "Custom", focus: "Personalized training" });
-    toast("Routine created.");
-    render();
-  }
-
-  function startRoutine(routineId) {
-    for (var i = 0; i < state.routines.length; i += 1) {
-      if (state.routines[i].id === routineId) {
-        state.liveWorkout.name = state.routines[i].name;
-      }
-    }
-    setPage("workouts");
-    render();
-  }
-
-  function duplicateRoutine(routineId) {
-    for (var i = 0; i < state.routines.length; i += 1) {
-      if (state.routines[i].id === routineId) {
-        state.routines.push({ id: uid(), name: state.routines[i].name + " Copy", days: state.routines[i].days, focus: state.routines[i].focus });
-        break;
-      }
-    }
-    toast("Routine duplicated.");
-    render();
-  }
-
-  function deleteRoutine(routineId) {
-    state.routines = state.routines.filter(function (routine) { return routine.id !== routineId; });
-    toast("Routine deleted.");
-    render();
-  }
-
-  function saveWeight() {
-    var value = Number(state.pendingWeight || 0);
-    if (!value) {
-      toast("Enter a body weight first.");
-      return;
-    }
-    state.weightLogs.unshift({ id: uid(), value: value, createdAt: new Date().toISOString() });
-    state.pendingWeight = "";
-    toast("Body weight logged.");
-    render();
-  }
-
-  function nutritionSummary() {
-    var today = new Date().toISOString().slice(0, 10);
-    return state.meals.reduce(function (acc, meal) {
-      if (String(meal.createdAt).slice(0, 10) === today) {
-        acc.calories += Number(meal.calories) || 0;
-        acc.protein += Number(meal.protein) || 0;
-        acc.water += Number(meal.water) || 0;
-        acc.meals += 1;
-      }
-      return acc;
-    }, { calories: 0, protein: 0, water: 0, meals: 0 });
-  }
-
-  function mealProgress() {
-    var summary = nutritionSummary();
-    return Math.min(100, Math.round((summary.calories / 2400) * 100));
-  }
-
-  function saveMeal() {
-    if (!state.pendingMeal.name || !state.pendingMeal.calories) {
-      toast("Meal name and calories are required.");
-      return;
-    }
-
-    state.meals.unshift({
-      id: uid(),
-      name: state.pendingMeal.name,
-      calories: Number(state.pendingMeal.calories) || 0,
-      protein: Number(state.pendingMeal.protein) || 0,
-      water: Number(state.pendingMeal.water) || 0,
-      createdAt: new Date().toISOString()
-    });
-    state.pendingMeal = { name: "", calories: "", protein: "", water: "" };
-    toast("Meal saved.");
-    render();
-  }
-
-  function isPremiumUser() {
-    return !!(state.user && state.user.plan === "PRO");
-  }
-
-  function adminUpgradeUser(userId) {
-    if (!isAdminUser()) {
-      toast("Only admin can manage user plans.");
-      return;
-    }
-    for (var i = 0; i < state.users.length; i += 1) {
-      if (String(state.users[i].id) === String(userId) && state.users[i].role !== "ADMIN") {
-        state.users[i].plan = "PRO";
-        if (state.user && state.user.email === state.users[i].email) state.user.plan = "PRO";
-      }
-    }
-    toast("User upgraded to premium.");
-    render();
-  }
-
-  function adminDowngradeUser(userId) {
-    if (!isAdminUser()) {
-      toast("Only admin can manage user plans.");
-      return;
-    }
-    for (var i = 0; i < state.users.length; i += 1) {
-      if (String(state.users[i].id) === String(userId) && state.users[i].role !== "ADMIN") {
-        state.users[i].plan = "FREE";
-        if (state.user && state.user.email === state.users[i].email) state.user.plan = "FREE";
-      }
-    }
-    toast("User downgraded to free.");
-    render();
-  }
-
-  function adminDeleteUser(userId) {
-    if (!isAdminUser()) {
-      toast("Only admin can delete users.");
-      return;
-    }
-    state.users = state.users.filter(function (user) {
-      return String(user.id) !== String(userId) || user.role === "ADMIN";
-    });
-    toast("User deleted.");
-    render();
-  }
-
-  function toggleIntegration(key) {
-    if (key === "appleHealth" || key === "appleWatch") {
-      toast("These integrations rely on imported export data in the web app.");
-      return;
-    }
-    state.integrations[key].connected = !state.integrations[key].connected;
-    state.integrations[key].lastSync = new Date().toISOString();
-    toast(labelize(key) + (state.integrations[key].connected ? " connected." : " disconnected."));
-    render();
-  }
-
-  function syncIntegration(key) {
-    state.integrations[key].lastSync = new Date().toISOString();
-    toast(labelize(key) + " synced.");
-    render();
-  }
-
-  function toggleAutoSync(key) {
-    if (key === "hevyImport" && !requirePremiumFeature("Hevy duplicate detection")) return;
-    state.integrations[key].autoSync = !state.integrations[key].autoSync;
-    render();
-  }
-
-  function requirePremiumFeature(label) {
-    if (isAdminUser() || isPremiumUser()) return true;
-    toast(label + " is available for premium users only.");
-    return false;
-  }
-
-  function triggerHiddenFile(inputId) {
-    var node = document.getElementById(inputId);
-    if (node) node.click();
-  }
-
-  function previewImport(file) {
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var text = String(reader.result || "");
-      var imported = parseHevyFile(file.name, text);
-
-      state.importPreview = imported.preview;
-      state.workouts = mergeImportedWorkouts(imported.workouts);
-      state.weightLogs = mergeWeightLogs(imported.weightLogs);
-      state.routines = mergeRoutines(imported.routines);
-      state.integrations.hevyImport.connected = imported.workouts.length > 0 || imported.weightLogs.length > 0 || imported.routines.length > 0;
-      state.integrations.hevyImport.lastSync = new Date().toISOString();
-      toast(imported.toast);
-      render();
-    };
-    reader.readAsText(file);
-  }
-
-  function mergeImportedWorkouts(workouts) {
-    if (!state.integrations.hevyImport.autoSync) return workouts.concat(state.workouts);
-    var existing = {};
-    state.workouts.forEach(function (workout) {
-      existing[(workout.title || "") + "|" + String(workout.createdAt || "").slice(0, 10)] = true;
-    });
-    var merged = workouts.filter(function (workout) {
-      var key = (workout.title || "") + "|" + String(workout.createdAt || "").slice(0, 10);
-      if (existing[key]) return false;
-      existing[key] = true;
-      return true;
-    });
-    return merged.concat(state.workouts);
-  }
-
-  function mergeWeightLogs(entries) {
-    var existing = {};
-    state.weightLogs.forEach(function (entry) {
-      existing[String(entry.createdAt).slice(0, 10) + "|" + Number(entry.value || 0)] = true;
-    });
-    var merged = entries.filter(function (entry) {
-      var key = String(entry.createdAt).slice(0, 10) + "|" + Number(entry.value || 0);
-      if (existing[key]) return false;
-      existing[key] = true;
-      return true;
-    });
-    return merged.concat(state.weightLogs);
-  }
-
-  function mergeRoutines(routines) {
-    var existing = {};
-    state.routines.forEach(function (routine) {
-      existing[String(routine.name || "").toLowerCase()] = true;
-    });
-    var merged = routines.filter(function (routine) {
-      var key = String(routine.name || "").toLowerCase();
-      if (existing[key]) return false;
-      existing[key] = true;
-      return true;
-    });
-    return merged.concat(state.routines);
-  }
-
-  function parseHevyFile(fileName, text) {
-    var workouts = [];
-    var routines = [];
-    var weightLogs = [];
-    var preview = [];
-
-    if (/\.json$/i.test(fileName)) {
-      parseHevyJson(text, workouts, routines, weightLogs, preview, fileName);
-    } else {
-      parseHevyCsv(text, workouts, routines, weightLogs, preview, fileName);
-    }
-
-    if (workouts.length) preview.push({ title: number(workouts.length) + " workouts imported", source: fileName, merge: "Merged into existing workout history" });
-    if (routines.length) preview.push({ title: number(routines.length) + " routines imported", source: fileName, merge: "Added to routine library" });
-    if (weightLogs.length) preview.push({ title: number(weightLogs.length) + " weight entries imported", source: fileName, merge: "Added to progress history" });
-
-    if (!preview.length) {
-      preview.push({ title: "No compatible records", source: fileName, merge: "Nothing imported" });
-    }
-
-    return {
-      workouts: workouts,
-      routines: routines,
-      weightLogs: weightLogs,
-      preview: preview,
-      toast: workouts.length || routines.length || weightLogs.length ? "Hevy data imported." : "No compatible Hevy records found."
-    };
-  }
-
-  function parseHevyJson(text, workouts, routines, weightLogs, preview, fileName) {
-    try {
-      var data = JSON.parse(text);
-      var items = Array.isArray(data) ? data : (data.workouts || data.entries || []);
-      items.forEach(function (item) {
-        workouts.push(normalizeImportedWorkout(item.title || item.name || item.workout_title || "Imported Workout", item.createdAt || item.date || item.started_at, item.exercises || item.sets || []));
-      });
-
-      if (data.bodyWeightHistory && Array.isArray(data.bodyWeightHistory)) {
-        data.bodyWeightHistory.forEach(function (entry) {
-          weightLogs.push({
-            id: uid(),
-            value: Number(entry.value || entry.weight || 0),
-            createdAt: entry.createdAt || entry.date || new Date().toISOString()
-          });
-        });
-      }
-
-      if (data.routines && Array.isArray(data.routines)) {
-        data.routines.forEach(function (routine) {
-          routines.push({
-            id: uid(),
-            name: routine.name || "Imported Routine",
-            days: routine.days || "Imported",
-            focus: routine.focus || "Imported from Hevy"
-          });
-        });
-      }
-    } catch (error) {
-      preview.push({ title: "Import failed", source: fileName, merge: "Invalid JSON format" });
-    }
-  }
-
-  function parseHevyCsv(text, workouts, routines, weightLogs, preview, fileName) {
-    var lines = text.split(/\r?\n/).filter(Boolean);
-    if (lines.length < 2) {
-      preview.push({ title: "Import failed", source: fileName, merge: "CSV did not contain data rows" });
-      return;
-    }
-
-    var headers = splitCsvLine(lines[0]).map(function (header) { return String(header || "").trim().toLowerCase(); });
-    for (var i = 1; i < lines.length; i += 1) {
-      var columns = splitCsvLine(lines[i]);
-      if (!columns.length) continue;
-      var row = {};
-      for (var j = 0; j < headers.length; j += 1) row[headers[j]] = columns[j];
-
-      var title = firstValue(row, ["workout_title", "title", "name"]);
-      var date = firstValue(row, ["created_at", "date", "workout_date"]);
-      var routineName = firstValue(row, ["routine_name", "routine"]);
-      var weight = firstValue(row, ["bodyweight", "weight", "body_weight"]);
-
-      if (title) {
-        workouts.push(normalizeImportedWorkout(title, date, []));
-      }
-
-      if (routineName) {
-        routines.push({ id: uid(), name: routineName, days: "Imported", focus: "Imported from Hevy CSV" });
-      }
-
-      if (weight && !isNaN(Number(weight))) {
-        weightLogs.push({ id: uid(), value: Number(weight), createdAt: date || new Date().toISOString() });
-      }
-    }
-  }
-
-  function splitCsvLine(line) {
-    var values = [];
-    var current = "";
-    var inQuotes = false;
-    for (var i = 0; i < line.length; i += 1) {
-      var char = line.charAt(i);
-      if (char === '"' && line.charAt(i + 1) === '"') {
-        current += '"';
-        i += 1;
-      } else if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === "," && !inQuotes) {
-        values.push(current);
-        current = "";
+        state.importing = null;
       } else {
-        current += char;
+        const text = await file.text();
+        parsed = /\.json$/i.test(file.name) || text.trim().startsWith("{") || text.trim().startsWith("[") ? fromJson(text) : fromHevyCsv(text);
       }
-    }
-    values.push(current);
-    return values;
-  }
-
-  function firstValue(row, keys) {
-    for (var i = 0; i < keys.length; i += 1) {
-      if (row[keys[i]]) return row[keys[i]];
-    }
-    return "";
-  }
-
-  function normalizeImportedWorkout(title, createdAt, importedExercises) {
-    var exercises = importedExercises && importedExercises.length
-      ? importedExercises.map(function (exercise) {
-          return {
-            id: uid(),
-            name: exercise.name || "Imported Exercise",
-            sets: normalizeImportedSets(exercise.sets || exercise)
-          };
-        })
-      : [{ id: uid(), name: "Imported Exercise", sets: [{ id: uid(), previous: "Imported", weight: 80, reps: 8, done: true }] }];
-
-    var volume = 0;
-    exercises.forEach(function (exercise) {
-      exercise.sets.forEach(function (set) {
-        volume += (Number(set.weight) || 0) * (Number(set.reps) || 0);
-      });
-    });
-
-    return {
-      id: uid(),
-      title: title,
-      createdAt: createdAt || new Date().toISOString(),
-      durationMinutes: 45,
-      volume: volume || 3200,
-      calories: 380,
-      likes: 0,
-      comments: [],
-      quote: "Imported from Hevy history.",
-      exercises: exercises,
-      health: { heartRateAvg: state.healthData.heartRate || 118, recovery: 78 }
-    };
-  }
-
-  function normalizeImportedSets(rawSets) {
-    if (!Array.isArray(rawSets)) {
-      return [{ id: uid(), previous: "Imported", weight: 80, reps: 8, done: true }];
-    }
-    return rawSets.map(function (set) {
-      return {
-        id: uid(),
-        previous: String((set.previousWeight || set.previous || "Imported")) + (set.previousReps ? " x " + set.previousReps : ""),
-        weight: String(set.weight || set.kg || 0),
-        reps: String(set.reps || set.count || 0),
-        done: true
+      const seen = new Set(state.workouts.map(w => Math.round(ts(w) / 60000)));
+      const fresh = (parsed.workouts || []).filter(w => !seen.has(Math.round(ts(w) / 60000)));
+      const days = new Set(state.weights.map(w => dayKey(ts(w))));
+      const weights = (parsed.weights || []).filter(w => !days.has(dayKey(ts(w))));
+      const times = fresh.map(ts);
+      state.preview = {
+        file: file.name, workouts: parsed.workouts ? fresh : null, weights: parsed.weights ? weights : null, health: parsed.health,
+        skipped: (parsed.workouts || []).length - fresh.length + (parsed.weights || []).length - weights.length,
+        range: times.length ? `${fmtDate(Math.min(...times), { month: "short", day: "numeric", year: "numeric" })} – ${fmtDate(Math.max(...times), { month: "short", day: "numeric", year: "numeric" })}` : "",
       };
-    });
-  }
-
-  function previewHealthImport(file) {
-    if (!file) return;
-    var reader = new FileReader();
-    reader.onload = function () {
-      var text = String(reader.result || "");
-      var summary = parseHealthExport(text, file.name);
-      state.healthData = summary.healthData;
-      state.healthImportDetails = summary.details;
-      state.weightLogs = mergeWeightLogs(summary.weightLogs);
-      state.integrations.appleHealth.connected = !!summary.healthData.importedAt;
-      state.integrations.appleHealth.lastSync = summary.healthData.importedAt;
-      state.integrations.appleWatch.connected = summary.healthData.heartRate > 0;
-      state.integrations.appleWatch.lastSync = summary.healthData.importedAt;
-      toast("Apple Health export imported.");
+      if (!fresh.length && !weights.length && !parsed.health) { state.preview = null; toast("Nothing new in that file: everything is already here"); }
       render();
-    };
-    reader.readAsText(file);
+    } catch (e) { state.importing = null; render(); fail(e); }
   }
 
-  function parseHealthExport(text, fileName) {
-    var stepMatches = collectMatches(text, /Record[^>]*type="HKQuantityTypeIdentifierStepCount"[^>]*value="([0-9.]+)"/g);
-    var calorieMatches = collectMatches(text, /Record[^>]*type="HKQuantityTypeIdentifierActiveEnergyBurned"[^>]*value="([0-9.]+)"/g);
-    var heartMatches = collectMatches(text, /Record[^>]*type="HKQuantityTypeIdentifierHeartRate"[^>]*value="([0-9.]+)"/g);
-    var bodyMassMatches = collectMatches(text, /Record[^>]*type="HKQuantityTypeIdentifierBodyMass"[^>]*value="([0-9.]+)"/g);
-
-    var steps = sum(stepMatches) || extractFirstNumber(text, /steps[^0-9]*([0-9]+)/i);
-    var activeCalories = Math.round(sum(calorieMatches) || extractFirstNumber(text, /active[^0-9]*([0-9]+)/i));
-    var heartRate = average(heartMatches) || extractFirstNumber(text, /heart[^0-9]*([0-9]+)/i);
-    var latestMass = bodyMassMatches.length ? bodyMassMatches[bodyMassMatches.length - 1] : extractFirstNumber(text, /body[^0-9]*([0-9]+(?:\.[0-9]+)?)/i);
-
-    return {
-      healthData: {
-        source: fileName,
-        steps: Math.round(steps || 0),
-        activeCalories: Math.round(activeCalories || 0),
-        heartRate: Math.round(heartRate || 0),
-        recovery: heartRate ? Math.max(50, 100 - Math.round(heartRate / 2)) : 0,
-        importedAt: new Date().toISOString()
-      },
-      details: [
-        { label: "Step records", value: String(stepMatches.length) },
-        { label: "Energy records", value: String(calorieMatches.length) },
-        { label: "Heart-rate records", value: String(heartMatches.length) },
-        { label: "Body-mass records", value: String(bodyMassMatches.length) },
-        { label: "Latest imported body weight", value: latestMass ? String(latestMass) : "0", type: "body_mass_value" }
-      ],
-      weightLogs: latestMass ? [{
-        id: uid(),
-        value: Number(latestMass),
-        createdAt: new Date().toISOString()
-      }] : []
-    };
-  }
-
-  function collectMatches(text, pattern) {
-    var matches = [];
-    var match;
-    while ((match = pattern.exec(text))) {
-      matches.push(Number(match[1]));
-    }
-    return matches;
-  }
-
-  function extractFirstNumber(text, pattern) {
-    var match = text.match(pattern);
-    return match ? Number(match[1]) : 0;
-  }
-
-  function sum(values) {
-    return values.reduce(function (acc, value) { return acc + (Number(value) || 0); }, 0);
-  }
-
-  function average(values) {
-    return values.length ? sum(values) / values.length : 0;
-  }
-
-  function exportData() {
-    var data = JSON.stringify({
-      apiBase: API,
-      user: state.user,
-      workouts: state.workouts,
-      weightLogs: state.weightLogs,
-      meals: state.meals,
-      healthData: state.healthData,
-      routines: state.routines,
-      integrations: state.integrations
-    }, null, 2);
-    var blob = new Blob([data], { type: "application/json" });
-    var url = URL.createObjectURL(blob);
-    var link = document.createElement("a");
-    link.href = url;
-    link.download = "fitrank-export.json";
-    link.click();
-    URL.revokeObjectURL(url);
-    toast("Export created.");
-  }
-
-  function recentWorkouts() {
-    return state.workouts.slice(0, 4);
-  }
-
-  function buildAnalytics() {
-    var allWorkouts = state.workouts.slice().sort(function(a, b) {
-      return new Date(a.createdAt) - new Date(b.createdAt);
-    });
-    var workouts = filteredWorkouts();
-
-    // Monthly volume and sessions from ALL workouts
-    var monthlyVol = {};
-    var monthlySess = {};
-    allWorkouts.forEach(function(w) {
-      var d = new Date(w.createdAt);
-      if (isNaN(d)) return;
-      var key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2,'0');
-      monthlyVol[key] = (monthlyVol[key] || 0) + (w.volume || 0);
-      monthlySess[key] = (monthlySess[key] || 0) + 1;
-    });
-    var monthKeys = Object.keys(monthlyVol).sort();
-    var monthLabels = monthKeys.map(function(k) { return k.slice(5); }); // MM only
-    var monthVolValues = monthKeys.map(function(k) { return Math.round(monthlyVol[k]); });
-    var monthSessValues = monthKeys.map(function(k) { return monthlySess[k]; });
-
-    // Find top exercise (most sets)
-    var exerciseCounts = {};
-    allWorkouts.forEach(function(w) {
-      (w.exercises || []).forEach(function(ex) {
-        exerciseCounts[ex.name] = (exerciseCounts[ex.name] || 0) + (ex.sets ? ex.sets.length : 1);
-      });
-    });
-    var topExercise = Object.keys(exerciseCounts).sort(function(a,b){
-      return exerciseCounts[b] - exerciseCounts[a];
-    })[0] || (state.selectedExercise !== 'All' ? state.selectedExercise : 'Top Lift');
-    var targetExercise = state.selectedExercise !== 'All' ? state.selectedExercise : topExercise;
-
-    // Strength progression for target exercise - best weight per workout day
-    var strengthMap = {};
-    allWorkouts.forEach(function(w) {
-      var day = String(w.createdAt).slice(0,10);
-      (w.exercises || []).forEach(function(ex) {
-        if (ex.name === targetExercise) {
-          (ex.sets || []).forEach(function(s) {
-            var kg = parseFloat(s.weight) || 0;
-            if (kg > (strengthMap[day] || 0)) strengthMap[day] = kg;
-          });
-        }
-      });
-    });
-    var strengthDays = Object.keys(strengthMap).sort();
-    var strengthValues = strengthDays.map(function(d) { return strengthMap[d]; });
-    var strengthLabels = strengthDays.map(function(d) { return d.slice(5); });
-
-    // Consistency - workout days per week in range
-    var consistMap = {};
-    workouts.forEach(function(w) {
-      var day = String(w.createdAt).slice(0,10);
-      consistMap[day] = (consistMap[day] || 0) + 1;
-    });
-    var consistDays = Object.keys(consistMap).sort();
-
-    // Body weight
-    var bwEntries = state.weightLogs.slice().sort(function(a,b){
-      return new Date(a.createdAt) - new Date(b.createdAt);
-    });
-    var bwValues = bwEntries.map(function(e) { return Number(e.value) || 0; });
-    var bwLabels = bwEntries.map(function(e) { return String(e.createdAt).slice(0,10).slice(5); });
-
-    // Total volume all-time
-    var totalVol = allWorkouts.reduce(function(acc, w) { return acc + (w.volume || 0); }, 0);
-    var bestMonthKey = monthKeys.reduce(function(best, k) {
-      return monthlyVol[k] > (monthlyVol[best] || 0) ? k : best;
-    }, monthKeys[0] || '');
-
-    var weekly = state.workouts.filter(function(w) {
-      return new Date(w.createdAt) >= Date.now() - 7 * 86400000;
-    });
-
-    return {
-      monthlyVolume: { values: monthVolValues, labels: monthLabels },
-      monthlySessions: { values: monthSessValues, labels: monthLabels },
-      strength: { values: strengthValues, labels: strengthLabels },
-      topExercise: targetExercise,
-      bodyWeight: { values: bwValues, labels: bwLabels },
-      consistency: { values: consistDays.map(function(d){ return consistMap[d]; }), labels: consistDays.map(function(d){ return d.slice(5); }) },
-      volume: { values: workouts.map(function(w){ return Math.round(w.volume||0); }), labels: workouts.map(function(w){ return String(w.createdAt).slice(5,10); }) },
-      calories: { values: [], labels: [] },
-      heartRate: { values: workouts.map(function(w){ return w.health && w.health.heartRateAvg || 0; }), labels: workouts.map(function(w){ return String(w.createdAt).slice(5,10); }) },
-      prs: prList(),
-      heat: muscleHeat(workouts),
-      recoveryScore: computeRecoveryScore(workouts),
-      restingHeartRate: computeRestingHeartRate(workouts),
-      averageVolume: allWorkouts.length ? totalVol / allWorkouts.length : 0,
-      totalVolume: totalVol,
-      bestMonth: bestMonthKey ? bestMonthKey : '--',
-      goalHelper: weekly.length + ' of 4 weekly workouts completed',
-      workoutCount: workouts.length,
-      importedHealth: !!state.healthData.importedAt
-    };
-  }
-
-  function filteredWorkouts() {
-    var cutoff = Date.now() - rangeDays() * 24 * 60 * 60 * 1000;
-    return state.workouts.filter(function (workout) {
-      var inRange = new Date(workout.createdAt).getTime() >= cutoff;
-      var matchExercise = state.selectedExercise === "All" || workout.exercises.some(function (exercise) {
-        return exercise.name === state.selectedExercise;
-      });
-      return inRange && matchExercise;
-    }).sort(function(a, b) { return new Date(a.createdAt) - new Date(b.createdAt); });
-  }
-
-  function chartData(values, labels) {
-    return { values: values.length ? values : [], labels: labels || [] };
-  }
-
-  function exerciseOptions() {
-    var map = { All: true };
-    state.workouts.forEach(function (workout) {
-      workout.exercises.forEach(function (exercise) {
-        map[exercise.name] = true;
-      });
-    });
-    return Object.keys(map);
-  }
-
-  function prList() {
-    var map = {};
-    state.workouts.forEach(function (workout) {
-      workout.exercises.forEach(function (exercise) {
-        exercise.sets.forEach(function (set) {
-          var score = (Number(set.weight) || 0) * 100 + (Number(set.reps) || 0);
-          if (!map[exercise.name] || score > map[exercise.name].score) {
-            map[exercise.name] = {
-              label: exercise.name,
-              value: (Number(set.weight) || 0) + " kg x " + (Number(set.reps) || 0),
-              score: score
-            };
-          }
-        });
-      });
-    });
-    var list = Object.keys(map).map(function (key) { return map[key]; }).slice(0, 5);
-    return list.length ? list : [{ label: "No PR yet", value: "Complete workouts to track records" }];
-  }
-
-  function muscleHeat(workouts) {
-    var groups = { Chest: 0, Back: 0, Legs: 0, Shoulders: 0, Arms: 0, Core: 0 };
-    workouts.forEach(function (workout) {
-      workout.exercises.forEach(function (exercise) {
-        groups[inferMuscle(exercise.name)] += 1;
-      });
-    });
-    return Object.keys(groups).map(function (group) {
-      return { group: group, count: groups[group] };
-    });
-  }
-
-  function inferMuscle(name) {
-    var lower = String(name).toLowerCase();
-    if (lower.indexOf("bench") > -1 || lower.indexOf("fly") > -1) return "Chest";
-    if (lower.indexOf("row") > -1 || lower.indexOf("pull") > -1) return "Back";
-    if (lower.indexOf("squat") > -1 || lower.indexOf("dead") > -1 || lower.indexOf("leg") > -1) return "Legs";
-    if (lower.indexOf("press") > -1 || lower.indexOf("raise") > -1) return "Shoulders";
-    if (lower.indexOf("curl") > -1 || lower.indexOf("tricep") > -1) return "Arms";
-    return "Core";
-  }
-
-  function maxWeight(workout) {
-    var max = 0;
-    workout.exercises.forEach(function (exercise) {
-      exercise.sets.forEach(function (set) {
-        max = Math.max(max, Number(set.weight) || 0);
-      });
-    });
-    return max;
-  }
-
-  function streak() {
-    var dates = {};
-    state.workouts.forEach(function (workout) {
-      dates[new Date(workout.createdAt).toISOString().slice(0, 10)] = true;
-    });
-    var count = 0;
-    var cursor = new Date();
-    while (dates[cursor.toISOString().slice(0, 10)]) {
-      count += 1;
-      cursor.setDate(cursor.getDate() - 1);
-    }
-    return count;
-  }
-
-  function dashboardStats() {
-    var weekCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    var weekly = state.workouts.filter(function (workout) { return new Date(workout.createdAt).getTime() >= weekCutoff; });
-    var weeklyCalories = weekly.reduce(function (sum, workout) { return sum + (workout.calories || 0); }, 0);
-    var workoutTarget = 4;
-    return {
-      streak: streak(),
-      weeklyCalories: weeklyCalories,
-      goalProgress: Math.min(100, Math.round((weekly.length / workoutTarget) * 100)),
-      goalHelper: weekly.length + " of " + workoutTarget + " weekly workouts completed",
-      recoveryProgress: computeRecoveryScore(weekly.length ? weekly : state.workouts),
-      quote: motivationalQuote()
-    };
-  }
-
-  function rangeDays() {
-    if (state.dateRange === "1y") return 365;
-    if (state.dateRange === "1m") return 30;
-    if (state.dateRange === "7d") return 7;
-    return 3;
-  }
-
-  function aggregateByDay(workouts, picker) {
-    var map = {};
-    workouts.forEach(function (workout) {
-      var key = String(workout.createdAt || "").slice(0, 10);
-      map[key] = (map[key] || 0) + (Number(picker(workout)) || 0);
-    });
-    var labels = Object.keys(map).sort();
-    var values = labels.map(function (key) { return map[key]; });
-    return { labels: labels, values: values };
-  }
-
-  function computeRecoveryScore(workouts) {
-    if (state.healthData.recovery) return state.healthData.recovery;
-    if (!workouts.length) return 0;
-    var averageHeartRate = average(workouts.map(function (workout) {
-      return workout.health && workout.health.heartRateAvg ? workout.health.heartRateAvg : 0;
-    }).filter(Boolean));
-    return Math.max(45, Math.min(98, Math.round(92 - (averageHeartRate ? averageHeartRate / 4 : 8) + Math.min(8, workouts.length))));
-  }
-
-  function computeRestingHeartRate(workouts) {
-    if (state.healthData.heartRate) return Math.max(46, state.healthData.heartRate - 10);
-    var sample = average(workouts.map(function (workout) {
-      return workout.health && workout.health.heartRateAvg ? workout.health.heartRateAvg : 0;
-    }).filter(Boolean));
-    return sample ? Math.max(48, Math.round(sample - 14)) : 0;
-  }
-
-  function extractHealthWeightSeries() {
-    return state.healthImportDetails.filter(function (item) {
-      return item.type === "body_mass_value";
-    }).map(function (item) {
-      return Number(item.value || 0);
-    }).filter(Boolean).slice(-12);
-  }
-
-  function workoutTimer() {
-    var seconds = Math.max(0, Math.floor((Date.now() - state.liveWorkout.startedAt) / 1000));
-    var mins = String(Math.floor(seconds / 60)).padStart(2, "0");
-    var secs = String(seconds % 60).padStart(2, "0");
-    return mins + ":" + secs;
-  }
-
-  function motivationalQuote() {
-    var quotes = [
-      "Consistency compounds faster than motivation.",
-      "Every logged rep is proof you showed up.",
-      "Train with intent, recover with discipline.",
-      "Stack sessions, not excuses."
-    ];
-    return quotes[Math.floor(Date.now() / 1000) % quotes.length];
-  }
-
-  function trainingInsight(analytics) {
-    if (!analytics.averageVolume) {
-      return "Finish a few workouts to unlock personalized training insights.";
-    }
-    if (analytics.recoveryScore >= 80) {
-      return "Recovery is strong. You can likely push one more high-intensity session this week.";
-    }
-    if (analytics.recoveryScore >= 65) {
-      return "Training is trending well. Keep volume steady and prioritize sleep before your next heavy day.";
-    }
-    return "Recovery looks limited. Consider a lighter session or additional rest before chasing PRs.";
-  }
-
-  function buildAdminAnalytics(normalUsers) {
-    var freeUsers = normalUsers.filter(function (user) { return user.plan !== "PRO"; }).length;
-    var proUsers = normalUsers.filter(function (user) { return user.plan === "PRO"; }).length;
-    var healthImports = state.healthData.importedAt ? 1 : 0;
-    var hevyReady = state.integrations.hevyImport.connected ? 1 : 0;
-    var mealHeavy = state.meals.length;
-    var workoutHeavy = state.workouts.length;
-    return {
-      freeUsers: freeUsers,
-      proUsers: proUsers,
-      healthImports: healthImports,
-      hevyReady: hevyReady,
-      planMix: [freeUsers, proUsers],
-      activityMix: [workoutHeavy, mealHeavy, state.weightLogs.length, state.importPreview.length],
-      summary: proUsers ? "Premium members are active in the current dataset. Use the user controls above to upgrade, downgrade, or prune accounts while monitoring import adoption and overall member activity." : "Most users are still on the free plan. Premium can now unlock form demos, advanced analytics, exports, and cleaner import tooling."
-    };
-  }
-
-  function computeBest1RM() {
-    var best = {};
-    state.workouts.forEach(function (workout) {
-      (workout.exercises || []).forEach(function (exercise) {
-        (exercise.sets || []).forEach(function (set) {
-          var w = Number(set.weight) || 0;
-          var r = Number(set.reps) || 0;
-          if (w > 0 && r > 0) {
-            var epley = Math.round(w * (1 + r / 30));
-            if (!best[exercise.name] || epley > best[exercise.name].oneRM) {
-              best[exercise.name] = { exercise: exercise.name, weight: w, reps: r, oneRM: epley };
-            }
-          }
-        });
-      });
-    });
-    return Object.keys(best).map(function (k) { return best[k]; }).slice(0, 6);
-  }
-
-  function computeGoalForecast() {
-    var weekMs = 7 * 24 * 60 * 60 * 1000;
-    var now = Date.now();
-    var last4 = state.workouts.filter(function (w) {
-      return now - new Date(w.createdAt).getTime() < 4 * weekMs;
-    });
-    var pace = parseFloat((last4.length / 4).toFixed(1));
-    if (pace >= 4) {
-      return { label: "On track! Goal achieved.", detail: "Hitting " + pace + " sessions/week which meets your 4-session weekly goal.", pace: String(pace) };
-    }
-    if (pace === 0) {
-      return { label: "No recent sessions.", detail: "Start logging workouts to generate a forecast.", pace: "0" };
-    }
-    var weeksNeeded = Math.ceil((4 - pace) / 0.5);
-    return {
-      label: "~" + weeksNeeded + " weeks to consistent goal pace",
-      detail: "At " + pace + " sessions/week, gradually increase by half a session per week to reach 4/week.",
-      pace: String(pace)
-    };
-  }
-
-  function computeAIInsights() {
-    var insights = [];
-    var analytics = buildAnalytics();
-    if (!state.workouts.length) {
-      insights.push({ title: "Start logging workouts", text: "Complete a few workouts to receive personalized AI coaching insights." });
-      return insights;
-    }
-    if (analytics.recoveryScore < 65) {
-      insights.push({ title: "Recovery is low", text: "Score: " + analytics.recoveryScore + "%. Add a rest day or a light mobility session before your next heavy lift." });
-    } else if (analytics.recoveryScore >= 80) {
-      insights.push({ title: "Recovery looks great", text: "Score: " + analytics.recoveryScore + "%. You are primed for a high-intensity session. Consider pushing for a PR." });
-    }
-    if (analytics.averageVolume > 0 && analytics.averageVolume < 2000) {
-      insights.push({ title: "Increase training volume", text: "Avg volume " + Math.round(analytics.averageVolume) + " kg/session. Add one extra set per compound lift to stimulate more growth." });
-    } else if (analytics.averageVolume >= 4000) {
-      insights.push({ title: "High volume detected", text: "Avg " + Math.round(analytics.averageVolume) + " kg/session. Plan a deload week every 4-6 weeks to prevent overtraining." });
-    }
-    var weekly = state.workouts.filter(function (w) {
-      return Date.now() - new Date(w.createdAt).getTime() < 7 * 24 * 60 * 60 * 1000;
-    });
-    if (!weekly.length) {
-      insights.push({ title: "No sessions this week", text: "No workout logged in 7 days. Even a 20-minute session builds long-term consistency." });
-    } else if (weekly.length >= 5) {
-      insights.push({ title: "High weekly frequency", text: "You have done " + weekly.length + " sessions this week. Include at least one full rest day to recover properly." });
-    }
-    if (!insights.length) {
-      insights.push({ title: "Training is well-balanced", text: "Everything looks solid. Keep the consistency and nudge intensity by 2-5% over the next 2 weeks." });
-    }
-    return insights;
-  }
-
-  function exportCsv() {
-    if (!requirePremiumFeature("Premium CSV export")) return;
-    var header = ["Date", "Workout", "Duration(min)", "Volume(kg)", "Calories", "Exercise", "Set", "Weight", "Reps"];
-    var rows = [header];
-    state.workouts.forEach(function (workout) {
-      var exercises = workout.exercises && workout.exercises.length ? workout.exercises : [{ name: workout.title || "Workout", sets: [] }];
-      exercises.forEach(function (exercise) {
-        var sets = exercise.sets && exercise.sets.length ? exercise.sets : [{ weight: "", reps: "" }];
-        sets.forEach(function (set, i) {
-          rows.push([
-            workout.createdAt || "",
-            workout.title || "",
-            workout.durationMinutes || "",
-            workout.volume || "",
-            workout.calories || "",
-            exercise.name || "",
-            i + 1,
-            set.weight || "",
-            set.reps || ""
-          ]);
-        });
-      });
-    });
-    var csv = rows.map(function (row) {
-      return row.map(function (cell) {
-        var s = String(cell == null ? "" : cell).replace(/"/g, '""');
-        return '"' + s + '"';
-      }).join(",");
-    }).join("\n");
-    var blob = new Blob([csv], { type: "text/csv" });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "fitrank-workouts.csv";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast("CSV export downloaded.");
-  }
-
-
-
-  function findExerciseById(exerciseId) {
-    for (var i = 0; i < state.liveWorkout.exercises.length; i += 1) {
-      if (state.liveWorkout.exercises[i].id === exerciseId) return state.liveWorkout.exercises[i];
-    }
-    return null;
-  }
-
-  function previousSetHint(name) {
-    var lower = String(name || "").toLowerCase();
-    if (lower.indexOf("squat") > -1) return "Start with your working squat load";
-    if (lower.indexOf("bench") > -1 || lower.indexOf("press") > -1) return "Start with your working press load";
-    if (lower.indexOf("row") > -1 || lower.indexOf("pull") > -1) return "Start with your working pull load";
-    return "No history yet";
-  }
-
-  function requirePremiumStatusText() {
-    if (isAdminUser() || isPremiumUser()) return { allowed: true, message: "" };
-    return {
-      allowed: false,
-      message: "Animated form demos are available for premium users only."
-    };
-  }
-
-  function exerciseMeta(name) {
-    for (var i = 0; i < EXERCISE_LIBRARY.length; i += 1) {
-      if (EXERCISE_LIBRARY[i].name === name) return EXERCISE_LIBRARY[i];
-    }
-    return {
-      name: name || "Exercise",
-      category: "General",
-      primaryMuscle: "Full Body",
-      equipment: "Any",
-      demoType: "generic",
-      cues: ["Stay controlled", "Use a pain-free range", "Brace before each rep"]
-    };
-  }
-
-  function buildExerciseLibrary() {
-    var seed = [
-      "Barbell Bench Press|Chest|Pectorals|Barbell|press",
-      "Incline Barbell Bench Press|Chest|Upper Chest|Barbell|press",
-      "Decline Bench Press|Chest|Lower Chest|Barbell|press",
-      "Dumbbell Bench Press|Chest|Pectorals|Dumbbell|press",
-      "Incline Dumbbell Press|Chest|Upper Chest|Dumbbell|press",
-      "Chest Fly|Chest|Pectorals|Cable|fly",
-      "Cable Fly|Chest|Pectorals|Cable|fly",
-      "Push Up|Chest|Pectorals|Bodyweight|press",
-      "Weighted Push Up|Chest|Pectorals|Bodyweight|press",
-      "Dip|Chest|Chest and Triceps|Bodyweight|press",
-      "Machine Chest Press|Chest|Pectorals|Machine|press",
-      "Pec Deck|Chest|Pectorals|Machine|fly",
-      "Pull Up|Back|Lats|Bodyweight|pull",
-      "Chin Up|Back|Lats and Biceps|Bodyweight|pull",
-      "Lat Pulldown|Back|Lats|Cable|pull",
-      "Wide Grip Lat Pulldown|Back|Upper Back|Cable|pull",
-      "Seated Cable Row|Back|Mid Back|Cable|row",
-      "Chest Supported Row|Back|Mid Back|Machine|row",
-      "Barbell Row|Back|Lats|Barbell|row",
-      "Pendlay Row|Back|Upper Back|Barbell|row",
-      "Single Arm Dumbbell Row|Back|Lats|Dumbbell|row",
-      "T Bar Row|Back|Mid Back|Machine|row",
-      "Face Pull|Back|Rear Delts|Cable|row",
-      "Straight Arm Pulldown|Back|Lats|Cable|pull",
-      "Back Extension|Back|Lower Back|Bodyweight|hinge",
-      "Back Squat|Legs|Quads|Barbell|squat",
-      "Front Squat|Legs|Quads|Barbell|squat",
-      "Goblet Squat|Legs|Quads|Dumbbell|squat",
-      "Hack Squat|Legs|Quads|Machine|squat",
-      "Leg Press|Legs|Quads|Machine|squat",
-      "Walking Lunge|Legs|Glutes|Dumbbell|lunge",
-      "Reverse Lunge|Legs|Glutes|Dumbbell|lunge",
-      "Bulgarian Split Squat|Legs|Quads|Dumbbell|lunge",
-      "Step Up|Legs|Glutes|Dumbbell|lunge",
-      "Romanian Deadlift|Legs|Hamstrings|Barbell|hinge",
-      "Conventional Deadlift|Legs|Posterior Chain|Barbell|hinge",
-      "Sumo Deadlift|Legs|Adductors|Barbell|hinge",
-      "Hip Thrust|Legs|Glutes|Barbell|hinge",
-      "Glute Bridge|Legs|Glutes|Bodyweight|hinge",
-      "Hamstring Curl|Legs|Hamstrings|Machine|curl",
-      "Leg Extension|Legs|Quads|Machine|extension",
-      "Standing Calf Raise|Legs|Calves|Machine|calf",
-      "Seated Calf Raise|Legs|Calves|Machine|calf",
-      "Overhead Press|Shoulders|Delts|Barbell|press",
-      "Seated Dumbbell Press|Shoulders|Delts|Dumbbell|press",
-      "Arnold Press|Shoulders|Delts|Dumbbell|press",
-      "Lateral Raise|Shoulders|Side Delts|Dumbbell|raise",
-      "Cable Lateral Raise|Shoulders|Side Delts|Cable|raise",
-      "Front Raise|Shoulders|Front Delts|Dumbbell|raise",
-      "Rear Delt Fly|Shoulders|Rear Delts|Dumbbell|raise",
-      "Upright Row|Shoulders|Upper Traps|Barbell|row",
-      "Shrug|Shoulders|Traps|Dumbbell|carry",
-      "Barbell Curl|Arms|Biceps|Barbell|curl",
-      "EZ Bar Curl|Arms|Biceps|Barbell|curl",
-      "Dumbbell Curl|Arms|Biceps|Dumbbell|curl",
-      "Hammer Curl|Arms|Brachialis|Dumbbell|curl",
-      "Preacher Curl|Arms|Biceps|Machine|curl",
-      "Cable Curl|Arms|Biceps|Cable|curl",
-      "Triceps Pushdown|Arms|Triceps|Cable|triceps",
-      "Overhead Triceps Extension|Arms|Triceps|Cable|triceps",
-      "Skull Crusher|Arms|Triceps|Barbell|triceps",
-      "Close Grip Bench Press|Arms|Triceps|Barbell|press",
-      "Bench Dip|Arms|Triceps|Bodyweight|triceps",
-      "Wrist Curl|Arms|Forearms|Dumbbell|curl",
-      "Reverse Curl|Arms|Forearms|Barbell|curl",
-      "Plank|Core|Abs|Bodyweight|core",
-      "Side Plank|Core|Obliques|Bodyweight|core",
-      "Hanging Leg Raise|Core|Abs|Bodyweight|core",
-      "Crunch|Core|Abs|Bodyweight|core",
-      "Cable Crunch|Core|Abs|Cable|core",
-      "Russian Twist|Core|Obliques|Bodyweight|core",
-      "Ab Wheel Rollout|Core|Abs|Bodyweight|core",
-      "Dead Bug|Core|Core Stability|Bodyweight|core",
-      "Mountain Climber|Core|Abs|Bodyweight|core",
-      "Farmer Carry|Conditioning|Grip and Core|Dumbbell|carry",
-      "Sled Push|Conditioning|Leg Drive|Sled|carry",
-      "Battle Rope Waves|Conditioning|Shoulders|Rope|cardio",
-      "Box Jump|Conditioning|Power|Plyo Box|jump",
-      "Jump Squat|Conditioning|Power|Bodyweight|jump",
-      "Burpee|Conditioning|Full Body|Bodyweight|cardio",
-      "Bike Erg|Conditioning|Cardio|Machine|cardio",
-      "Treadmill Run|Conditioning|Cardio|Machine|cardio",
-      "Rowing Machine|Conditioning|Cardio|Machine|row",
-      "Elliptical|Conditioning|Cardio|Machine|cardio",
-      "Jump Rope|Conditioning|Cardio|Rope|cardio",
-      "Kettlebell Swing|Conditioning|Posterior Chain|Kettlebell|hinge",
-      "Kettlebell Clean|Conditioning|Full Body|Kettlebell|hinge",
-      "Kettlebell Snatch|Conditioning|Full Body|Kettlebell|hinge",
-      "Thruster|Conditioning|Full Body|Barbell|press",
-      "Clean and Jerk|Olympic|Full Body|Barbell|hinge",
-      "Power Clean|Olympic|Full Body|Barbell|hinge",
-      "Snatch|Olympic|Full Body|Barbell|hinge",
-      "Push Press|Olympic|Delts|Barbell|press",
-      "High Pull|Olympic|Upper Back|Barbell|pull",
-      "Landmine Press|Shoulders|Delts|Barbell|press",
-      "Landmine Squat|Legs|Quads|Barbell|squat",
-      "Smith Machine Squat|Legs|Quads|Machine|squat",
-      "Smith Machine Incline Press|Chest|Upper Chest|Machine|press",
-      "Machine Row|Back|Mid Back|Machine|row",
-      "Assisted Pull Up|Back|Lats|Machine|pull",
-      "Assisted Dip|Chest|Chest and Triceps|Machine|press",
-      "Cable Kickback|Legs|Glutes|Cable|hinge",
-      "Adductor Machine|Legs|Adductors|Machine|extension",
-      "Abductor Machine|Legs|Glute Medius|Machine|extension",
-      "Good Morning|Legs|Hamstrings|Barbell|hinge",
-      "Nordic Curl|Legs|Hamstrings|Bodyweight|curl",
-      "Reverse Hyper|Back|Lower Back|Machine|hinge",
-      "Pallof Press|Core|Anti-Rotation Core|Cable|core"
-    ];
-
-    return seed.map(function (entry) {
-      var parts = entry.split("|");
-      return {
-        name: parts[0],
-        category: parts[1],
-        primaryMuscle: parts[2],
-        equipment: parts[3],
-        demoType: parts[4],
-        cues: buildExerciseCues(parts[4], parts[2])
-      };
-    });
-  }
-
-  function buildExerciseCues(demoType, muscle) {
-    var byType = {
-      press: ["Brace your torso", "Control the descent", "Finish with stacked wrists"],
-      fly: ["Slight elbow bend", "Open under control", "Squeeze through the chest"],
-      row: ["Lead with elbows", "Keep ribcage down", "Pause at contraction"],
-      pull: ["Drive elbows down", "Avoid shrugging", "Control the lowering phase"],
-      squat: ["Brace before each rep", "Knees track over toes", "Drive up through mid-foot"],
-      lunge: ["Stay tall", "Push evenly through the front foot", "Keep the rear leg balanced"],
-      hinge: ["Push hips back", "Keep spine neutral", "Finish with glutes, not lower back"],
-      curl: ["Keep upper arms quiet", "Use full range", "Lower slower than you lift"],
-      triceps: ["Elbows stay fixed", "Lock out with control", "Avoid torso swing"],
-      raise: ["Soft elbows", "Lift only to shoulder height", "Avoid momentum"],
-      extension: ["Control both directions", "Use the target muscle", "Avoid snapping the joint"],
-      calf: ["Pause at the top", "Stretch at the bottom", "Stay balanced"],
-      core: ["Exhale through effort", "Brace before moving", "Keep tension continuous"],
-      cardio: ["Keep rhythm smooth", "Stay tall", "Breathe consistently"],
-      carry: ["Stand tall", "Keep shoulders packed", "Walk under control"],
-      jump: ["Land softly", "Load hips first", "Reset between reps"]
-    };
-    return byType[demoType] || ["Move with control", "Use full range", "Keep tension on " + muscle];
-  }
-
-  function initials(value) {
-    var parts = String(value || "FR").trim().split(/\s+/).filter(Boolean);
-    if (!parts.length) return "FR";
-    return parts.slice(0, 2).map(function (part) { return part.charAt(0).toUpperCase(); }).join("");
-  }
-
-  function number(value) {
-    return Number(value || 0).toLocaleString();
-  }
-
-  function formatDateTime(value) {
-    var date = new Date(value);
-    return date.toLocaleDateString([], { month: "short", day: "numeric" }) + " - " + date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-
-  function formatShortDate(value) {
-    return new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-
-  function labelize(value) {
-    return String(value).replace(/([A-Z])/g, " $1").replace(/^./, function (char) { return char.toUpperCase(); });
-  }
-
-  function hasPositive(values) {
-    for (var i = 0; i < values.length; i += 1) {
-      if (values[i] > 0) return true;
-    }
-    return false;
-  }
-
-  function clone(value) {
-    return JSON.parse(JSON.stringify(value));
-  }
-
-  function escapeHtml(value) {
-    return String(value == null ? "" : value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  function escapeAttr(value) {
-    return escapeHtml(value);
-  }
-
-  function syncCurrentUserRecord() {
-    if (!state.user) return;
-    var existing = null;
-    for (var i = 0; i < state.users.length; i += 1) {
-      if (state.users[i].email === state.user.email) {
-        existing = state.users[i];
-        state.users[i] = {
-          id: state.users[i].id,
-          name: state.user.name,
-          email: state.user.email,
-          goal: state.user.goal,
-          plan: state.user.plan,
-          role: state.admin ? "ADMIN" : "USER",
-          createdAt: state.users[i].createdAt || new Date().toISOString()
-        };
+  async function runImport() {
+    const p = state.preview, items = [...(p.workouts || []).map(x => ["workouts", x]), ...(p.weights || []).map(x => ["weights", x])];
+    state.importing = { label: "Importing", done: 0, total: items.length };
+    render();
+    try {
+      for (const [kind, x] of items) {
+        const saved = await db.save(kind, x);
+        state[kind].push(saved);
+        state.importing.done++;
+        const bar = $("#import-bar"), c = $("#import-count");
+        if (bar) bar.style.setProperty("--w", (state.importing.done / items.length) * 100 + "%");
+        if (c) c.textContent = `${state.importing.done} / ${items.length}`;
       }
-    }
-    if (!existing) {
-      state.users.push({
-        id: state.user.id || uid(),
-        name: state.user.name,
-        email: state.user.email,
-        goal: state.user.goal,
-        plan: state.user.plan,
-        role: state.admin ? "ADMIN" : "USER",
-        createdAt: new Date().toISOString()
-      });
-    }
+      if (p.health) await saveSettings({ health: p.health });
+      toast(`Imported ${items.length} records`, "good");
+      state.preview = null;
+    } catch (e) { fail(e); }
+    state.workouts = sortDesc(state.workouts);
+    state.weights = sortDesc(state.weights);
+    state.importing = null;
+    render();
   }
+
+  function exportData(format) {
+    const stamp = new Date().toISOString().slice(0, 10);
+    let blob, name;
+    if (format === "csv") {
+      const rows = [["date", "workout", "exercise", "set", "weight_kg", "reps", "rpe"]];
+      state.workouts.forEach(w => w.sets.forEach((s, i) => rows.push([w.loggedAt, w.title, s.exercise, i + 1, s.weight, s.reps, s.rpe || ""])));
+      blob = new Blob([rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")], { type: "text/csv" });
+      name = `fitrank-workouts-${stamp}.csv`;
+    } else {
+      const u = state.user;
+      blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), user: { name: u.name, email: u.email, goal: u.goal, settings: u.settings }, workouts: state.workouts, meals: state.meals, weights: state.weights }, null, 2)], { type: "application/json" });
+      name = `fitrank-export-${stamp}.json`;
+    }
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  // ---------- rest timer (lives outside #app so re-renders never reset it) ----------
+  const rest = {
+    start(seconds) {
+      if (!seconds) return;
+      this.end = Date.now() + seconds * 1000;
+      this.total = seconds;
+      const el = $("#rest");
+      el.hidden = false;
+      el.innerHTML = out(h`<div class="rest-bar"><i></i></div><div class="rest-row">${icon("timer", 18)}<b id="rest-left">${clock(seconds)}</b><span class="muted">Rest</span>
+        <span class="spacer"></span><button class="btn ghost" data-rest="-15" aria-label="15 seconds less">−15</button><button class="btn ghost" data-rest="15" aria-label="15 seconds more">+15</button><button class="btn" data-rest="0">Skip</button></div>`);
+      this.paint();
+      clearInterval(this.iv);
+      this.iv = setInterval(() => this.paint(), 250);
+    },
+    paint() {
+      const left = (this.end - Date.now()) / 1000, el = $("#rest");
+      if (left <= 0) {
+        this.stop();
+        if (navigator.vibrate) navigator.vibrate([30, 60, 30]);
+        return toast("Rest's up. Next set!", "good");
+      }
+      $("#rest-left").textContent = clock(Math.ceil(left));
+      el.querySelector(".rest-bar i").style.transform = `scaleX(${left / this.total})`;
+    },
+    add(sec) { if (!sec) return this.stop(); this.end += sec * 1000; this.total = Math.max(this.total, (this.end - Date.now()) / 1000); this.paint(); },
+    stop() { clearInterval(this.iv); const el = $("#rest"); el.hidden = true; el.innerHTML = ""; },
+  };
+
+  // ---------- motion ----------
+  function afterRender() {
+    const main = $("#main");
+    if (main && main.classList.contains("enter")) {
+      main.querySelectorAll("[data-count]").forEach(countUp);
+      setTimeout(() => main.classList.remove("enter"), 1800);
+    }
+    document.querySelectorAll(".sheet [data-count]").forEach(countUp);
+    state.enter = false;
+    state.shownSheet = state.sheet && state.sheet.type;
+    const auto = $(".sheet [autofocus]");
+    if (auto) auto.focus();
+    if (!state.user) pulse.start(); else pulse.stop();
+  }
+
+  function countUp(el) {
+    const to = +el.dataset.count, fmt = el.dataset.fmt;
+    if (calm.matches || !to) return;
+    const t0 = performance.now(), dur = 1100;
+    const step = now => {
+      const p = Math.min(1, (now - t0) / dur), eased = 1 - Math.pow(2, -10 * p);
+      el.textContent = formatCount(p < 1 ? to * eased : to, fmt);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  /** Auth backdrop: slow heart-rate traces drifting across a dark field. */
+  const pulse = {
+    start() {
+      const c = $("#pulse");
+      if (!c || this.c === c) return;
+      this.stop();
+      this.c = c;
+      const ctx = c.getContext("2d"), dpr = Math.min(2, devicePixelRatio || 1);
+      const size = () => { c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr; };
+      size();
+      this.onResize = size;
+      addEventListener("resize", size);
+      const beat = x => { const p = ((x % 1) + 1) % 1; return p > 0.42 && p < 0.47 ? -Math.sin((p - 0.42) / 0.05 * Math.PI) * 1.0 : p > 0.47 && p < 0.52 ? Math.sin((p - 0.47) / 0.05 * Math.PI) * 0.45 : Math.sin(p * Math.PI * 2) * 0.03; };
+      const draw = t => {
+        const w = c.width, hgt = c.height, lines = 9;
+        ctx.clearRect(0, 0, w, hgt);
+        for (let i = 0; i < lines; i++) {
+          const y0 = hgt * (0.12 + (i / (lines - 1)) * 0.76), amp = hgt * 0.07 * (1 - Math.abs(i - 4) / 6), speed = 0.00004 * (1 + i * 0.15);
+          ctx.beginPath();
+          for (let x = 0; x <= w; x += 3 * dpr) {
+            const y = y0 + beat(x / (w * 0.55) - t * speed + i * 0.13) * amp;
+            x ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          }
+          ctx.strokeStyle = i === 4 ? "rgba(61,123,255,.85)" : `rgba(61,123,255,${0.1 + (1 - Math.abs(i - 4) / 4) * 0.22})`;
+          ctx.lineWidth = (i === 4 ? 2 : 1.25) * dpr;
+          ctx.stroke();
+        }
+        if (!calm.matches && !document.hidden) this.raf = requestAnimationFrame(draw);
+      };
+      this.raf = requestAnimationFrame(draw);
+    },
+    stop() { cancelAnimationFrame(this.raf); if (this.onResize) removeEventListener("resize", this.onResize); this.c = null; },
+  };
+
+  // chart scrubber: one delegated listener for every line chart
+  function scrub(e) {
+    const chart = e.target.closest && e.target.closest(".line-chart");
+    document.querySelectorAll(".line-chart .scrub:not([hidden])").forEach(s => { if (!chart || !chart.contains(s)) s.hidden = true; });
+    if (!chart) return;
+    const plot = chart.querySelector(".plot"), r = plot.getBoundingClientRect(), pts = JSON.parse(chart.dataset.points);
+    const x = ((e.clientX - r.left) / r.width) * 100;
+    const p = pts.reduce((best, q) => Math.abs(q[0] - x) < Math.abs(best[0] - x) ? q : best);
+    const s = plot.querySelector(".scrub");
+    s.hidden = false;
+    s.style.setProperty("--x", p[0] + "%");
+    s.style.setProperty("--y", p[1] + "%");
+    s.querySelector(".scrub-tip").textContent = `${p[3]} · ${p[2]}`;
+    s.classList.toggle("flip", p[0] > 70);
+  }
+
+  // ---------- events ----------
+  document.addEventListener("click", e => {
+    const restBtn = e.target.closest("[data-rest]");
+    if (restBtn) return rest.add(+restBtn.dataset.rest);
+    const el = e.target.closest("[data-act]");
+    if (!el || el.disabled) {
+      if (e.target.closest(".more-link")) state.sheet = null;
+      return;
+    }
+    e.preventDefault();
+    Promise.resolve(ACTIONS[el.dataset.act](el, e)).catch(fail);
+  });
+
+  document.addEventListener("submit", async e => {
+    const form = e.target, name = form.dataset.form;
+    if (!FORMS[name]) return;
+    e.preventDefault();
+    const btn = form.querySelector("button:not([type=button])");
+    if (btn) btn.disabled = true;
+    state.busy = true;
+    try {
+      await FORMS[name](Object.fromEntries(new FormData(form)), form);
+      state.auth.error = "";
+      render();
+    } catch (err) {
+      if (!state.user) { state.auth.error = err.message; state.auth.info = ""; render(); } else fail(err);
+    } finally {
+      state.busy = false;
+      if (btn && btn.isConnected) btn.disabled = false;
+    }
+  });
+
+  let qTimer;
+  document.addEventListener("input", e => {
+    const el = e.target, b = el.dataset.bind;
+    if (!b) return;
+    if (b === "title") { state.live.title = el.value; saveLive(); }
+    else if (b === "weight" || b === "reps") {
+      const x = findLive(el.closest("[data-ex]").dataset.ex), s = x.sets.find(y => y.id === el.closest(".set").dataset.set);
+      s[b] = el.value.replace(",", ".").replace(/[^\d.]/g, "");
+      saveLive();
+    } else if (b === "routine-name") state.sheet.name = el.value;
+    else if (b === "pick-q") { state.sheet.q = el.value; $("#pick-list").innerHTML = pickList(state.sheet); }
+    else if (b === "admin-q") { state.adminQ = el.value; clearTimeout(qTimer); qTimer = setTimeout(async () => { state.admin.users = await server.admin.users(state.adminQ); const pos = el.selectionStart; render(); const i = $("[data-bind=admin-q]"); i.focus(); i.setSelectionRange(pos, pos); }, 250); }
+  });
+
+  document.addEventListener("change", async e => {
+    const el = e.target;
+    if (el.dataset.file) return readFile(el);
+    const c = el.dataset.change;
+    if (c === "exercise") { state.exercise = el.value; state.enter = true; render(); }
+    if (c === "plan") {
+      try { await server.admin.plan(+el.dataset.id, el.value); toast("Plan updated"); loadAdmin(); } catch (err) { fail(err); }
+    }
+  });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && state.sheet) closeSheet();
+    if (e.key === "Enter" && e.target.dataset.bind === "reps") { e.preventDefault(); tick(e.target.closest(".set")); }
+  });
+  document.addEventListener("pointermove", scrub, { passive: true });
+  document.addEventListener("pointerdown", scrub, { passive: true });
+  addEventListener("hashchange", () => go(location.hash.replace(/^#\/?/, ""), false));
+  setInterval(() => { const c = $("#live-clock"); if (c && state.live) c.textContent = clock((Date.now() - state.live.startedAt) / 1000); }, 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && !state.user) { pulse.stop(); pulse.start(); } });
+
+  // ---------- boot ----------
+  async function boot() {
+    try {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 2500);
+      const res = await fetch("api/health", { cache: "no-store", signal: ctl.signal });
+      clearTimeout(timer);
+      const j = res.ok ? await res.json() : null;
+      if (j && j.status === "ok") { state.mode = "server"; state.store = j.store; db = server; }
+    } catch { /* no server: demo mode */ }
+    try {
+      if (state.mode === "server" ? token() : demo.read()) load(await db.me());
+    } catch { store.set(K.token, null); }
+    state.route = location.hash.replace(/^#\/?/, "") || "home";
+    if (!routes().some(n => n[0] === state.route)) state.route = "home";
+    render();
+    if (state.route === "admin" && state.user) loadAdmin();
+    if ("serviceWorker" in navigator && isSecureContext) navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  }
+  boot();
 })();
