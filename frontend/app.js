@@ -291,7 +291,7 @@
     </div>`;
   }
 
-  /** Line + area chart with a pointer scrubber. points: [{t, v, label}] in time order. */
+  /** Line + area chart with a pointer scrubber. points: [{t, v, label}] in time order. opts.records marks each new best. */
   function line(points, fmt, opts = {}) {
     if (points.length < 2) return empty(opts.icon || "progress", opts.emptyTitle || "Not enough data", opts.emptyText || "Log this at least twice to see a trend.");
     const vs = points.map(p => p.v), lo = Math.min(...vs), hi = Math.max(...vs), pad = (hi - lo) * 0.15 || hi * 0.05 || 1;
@@ -302,9 +302,11 @@
       const [x0, y0] = xy[i - 1], [x1, y1] = xy[i], cx = (x1 - x0) / 2;
       d += ` C${x0 + cx},${y0} ${x1 - cx},${y1} ${x1},${y1}`;
     }
-    const data = points.map((p, i) => [+xy[i][0].toFixed(2), +xy[i][1].toFixed(2), p.label, fmt(p.v)]);
+    let best = vs[0];
+    const rec = vs.map((v, i) => opts.records && i > 0 && v > best && (best = v));
+    const data = points.map((p, i) => [+xy[i][0].toFixed(2), +xy[i][1].toFixed(2), p.label, fmt(p.v), rec[i] ? 1 : 0]);
     const lastP = xy[xy.length - 1];
-    return h`<div class="line-chart" data-points="${JSON.stringify(data)}" role="img" aria-label="${opts.label || "Trend"}: ${fmt(vs[0])} to ${fmt(vs[vs.length - 1])}">
+    return h`<div class="line-chart" data-points="${JSON.stringify(data)}" role="img" aria-label="${opts.label || "Trend"}: ${fmt(vs[0])} to ${fmt(vs[vs.length - 1])}${opts.records ? `, ${rec.filter(Boolean).length} records` : ""}">
       <div class="y-axis"><span>${fmt(max - pad)}</span><span>${fmt(min + pad)}</span></div>
       <div class="plot">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -312,7 +314,8 @@
           <path class="area" d="${d} L100,100 L0,100 Z" fill="url(#fill-${opts.id})"/>
           <path class="stroke" d="${d}" pathLength="1"/>
         </svg>
-        <span class="end-dot" style="left:${lastP[0]}%;top:${lastP[1]}%"></span>
+        ${xy.map(([x, y], i) => rec[i] && i < xy.length - 1 ? h`<span class="pr-dot" style="left:${x}%;top:${y}%;--d:${(0.3 + x * 0.006).toFixed(2)}s"></span>` : "")}
+        <span class="end-dot${rec[xy.length - 1] ? " pr" : ""}" style="left:${lastP[0]}%;top:${lastP[1]}%"></span>
         <div class="scrub" hidden><span class="scrub-dot"></span><span class="scrub-tip"></span></div>
       </div>
       <div class="x-axis"><span>${points[0].label}</span><span>${points[points.length - 1].label}</span></div>
@@ -522,7 +525,7 @@
           <header class="card-head"><h2>Estimated 1RM</h2>
             ${lifts.length ? h`<select data-change="exercise" aria-label="Exercise">${lifts.slice(0, 40).map(n => h`<option ${n === ex ? "selected" : ""}>${n}</option>`)}</select>` : ""}
           </header>
-          ${lifts.length ? line(strength, v => fmtW(v) + " " + unit(), { id: "e1", label: ex + " estimated 1RM" }) : empty("progress", "No lifts yet", "Sets of 12 reps or fewer feed the strength chart.")}
+          ${lifts.length ? line(strength, v => fmtW(v) + " " + unit(), { id: "e1", label: ex + " estimated 1RM", records: true }) : empty("progress", "No lifts yet", "Sets of 12 reps or fewer feed the strength chart.")}
         </section>
         <section class="card" style="--i:1">
           <header class="card-head"><h2>Volume per week</h2><span class="muted">${unit()}</span></header>
@@ -1346,7 +1349,7 @@
     s.hidden = false;
     s.style.setProperty("--x", p[0] + "%");
     s.style.setProperty("--y", p[1] + "%");
-    s.querySelector(".scrub-tip").textContent = `${p[3]} · ${p[2]}`;
+    s.querySelector(".scrub-tip").textContent = `${p[3]} · ${p[2]}${p[4] ? " · PR" : ""}`;
     s.classList.toggle("flip", p[0] > 70);
   }
 
