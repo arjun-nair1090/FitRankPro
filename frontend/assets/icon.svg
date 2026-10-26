@@ -1,9 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FitRank">
   <rect width="512" height="512" rx="112" fill="#0B0C0E"/>
-  <rect x="70" y="232" width="372" height="48" rx="16" fill="#3D7BFF"/>
-  <rect x="46" y="194" width="30" height="124" rx="12" fill="#F4F5F7"/>
-  <rect x="84" y="208" width="36" height="96" rx="13" fill="#F4F5F7"/>
-  <rect x="392" y="208" width="36" height="96" rx="13" fill="#F4F5F7"/>
-  <rect x="436" y="194" width="30" height="124" rx="12" fill="#F4F5F7"/>
-  <path d="M184 146h90c46 0 82 35 82 79 0 30-16 56-42 69l58 72h-72l-47-61h-20v61h-62V146zm62 54v51h28c12 0 22-11 22-25 0-15-10-26-22-26h-28z" fill="#F4F5F7"/>
+  <circle cx="256" cy="256" r="156" fill="none" stroke="#252930" stroke-width="80"/>
+  <circle cx="256" cy="256" r="156" fill="none" stroke="#3D7BFF" stroke-width="80" stroke-linecap="round" pathLength="100" stroke-dasharray="80 100" transform="rotate(-90 256 256)"/>
+  <circle cx="107.6" cy="207.8" r="54" fill="#F5B53D" stroke="#0B0C0E" stroke-width="20"/>
 </svg>

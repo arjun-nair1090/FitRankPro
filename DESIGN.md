@@ -222,7 +222,10 @@ Gently rounded, never pill-shaped except chips and badges. Cards 14px, controls 
 - **Phone tab bar:** five equal columns, icon over an 11px label, current tab gets chalk text and a blue icon.
 
 ### Dial (signature)
-Ring gauge on a control-slate track, 9-unit stroke with a round cap, drawn clockwise from 12 o'clock. The figure and its label sit inside; one muted sentence below says what the number means against a real baseline. Tone follows the metric: blue for load, green for sessions, amber for fuel. On route entry the ring draws from empty in 1.5s and the figure counts up.
+Ring gauge on a control-slate track, 9-unit stroke with a round cap, drawn clockwise from 12 o'clock. The figure and its label sit inside; one muted sentence below says what the number means against a real baseline. Tone follows the metric: blue for load, green for sessions, amber for fuel. On route entry the ring draws from empty in 1.5s and the figure counts up. Past 100%, a brighter second lap grows over the full ring after it lands.
+
+### Brand mark
+The dial, reduced to an icon: a signal-blue ring 80% drawn clockwise from 12 o'clock on a control-slate track, ending in a record-amber dot cut out from the ring by a ground-coloured gap. Ground tile with a 112/512 corner radius; the 180px apple-touch icon is square and full-bleed so iOS applies its own mask. Ring stroke is 80/512 and the dot 108/512 so both survive at 16px. `frontend/assets/icon.svg` is the source; the PNGs are renders of it.
 
 ### Logger header
 Title (editable) and Finish on one row, then Duration, Volume and Sets as labelled 22px figures. Sticky from 900px up; scrolls away on phones to give the set rows the screen.
